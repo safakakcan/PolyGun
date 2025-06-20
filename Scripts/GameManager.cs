@@ -93,10 +93,8 @@ public partial class GameManager : Node
 	
 	private void HandleInput()
 	{
-		if (Input.IsActionJustPressed("ui_cancel") && _currentState == GameState.Playing)
-		{
-			PauseGame();
-		}
+		// Let UIManager handle ESC key for pause/resume logic
+		// GameManager will respond to UIManager signals instead
 	}
 	
 	public void ChangeGameState(GameState newState)

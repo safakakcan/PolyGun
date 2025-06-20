@@ -25,6 +25,9 @@ public partial class UIManager : Control
 
 	public override void _Ready()
 	{
+		// Allow UI to process input even when the game is paused
+		ProcessMode = ProcessModeEnum.Always;
+		
 		SetupUI();
 		ConnectSignals();
 	}
@@ -123,6 +126,7 @@ public partial class UIManager : Control
 		_pauseMenu = new Control();
 		_pauseMenu.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		_pauseMenu.Visible = false;
+		_pauseMenu.ProcessMode = ProcessModeEnum.Always; // Allow processing when paused
 		parent.AddChild(_pauseMenu);
 
 		// Semi-transparent background
@@ -170,6 +174,7 @@ public partial class UIManager : Control
 		_gameOverScreen = new Control();
 		_gameOverScreen.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		_gameOverScreen.Visible = false;
+		_gameOverScreen.ProcessMode = ProcessModeEnum.Always; // Allow processing when paused
 		parent.AddChild(_gameOverScreen);
 
 		// Semi-transparent background
@@ -211,6 +216,7 @@ public partial class UIManager : Control
 		_settingsMenu = new Control();
 		_settingsMenu.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		_settingsMenu.Visible = false;
+		_settingsMenu.ProcessMode = ProcessModeEnum.Always; // Allow processing when paused
 		parent.AddChild(_settingsMenu);
 
 		// Semi-transparent background
@@ -271,6 +277,7 @@ public partial class UIManager : Control
 	{
 		if (@event.IsActionPressed("ui_cancel")) // ESC key
 		{
+			GD.Print("ESC key pressed in UIManager!");
 			TogglePause();
 		}
 	}
@@ -279,6 +286,8 @@ public partial class UIManager : Control
 	{
 		_isPaused = !_isPaused;
 		_pauseMenu.Visible = _isPaused;
+		
+		GD.Print($"TogglePause called! Paused: {_isPaused}, Menu visible: {_pauseMenu.Visible}");
 		
 		GetTree().Paused = _isPaused;
 		
@@ -346,28 +355,33 @@ public partial class UIManager : Control
 
 	private void OnResumePressed()
 	{
+		GD.Print("Resume button pressed!");
 		TogglePause();
 	}
 
 	private void OnSettingsPressed()
 	{
+		GD.Print("Settings button pressed!");
 		_pauseMenu.Visible = false;
 		_settingsMenu.Visible = true;
 	}
 
 	private void OnSettingsBackPressed()
 	{
+		GD.Print("Settings back button pressed!");
 		_settingsMenu.Visible = false;
 		_pauseMenu.Visible = true;
 	}
 
 	private void OnQuitPressed()
 	{
+		GD.Print("Quit button pressed!");
 		GetTree().Quit();
 	}
 
 	private void OnRespawnPressed()
 	{
+		GD.Print("Respawn button pressed!");
 		_isGameOver = false;
 		_gameOverScreen.Visible = false;
 		
