@@ -21,7 +21,7 @@ public partial class UIManager : Control
 	private bool _isGameOver = false;
 	
 	// References
-	private PlayerController _player;
+	private ModernPlayerController _player;
 
 	public override void _Ready()
 	{
@@ -261,136 +261,200 @@ public partial class UIManager : Control
 
 	private void ConnectSignals()
 	{
-		// Find player and connect to its signals
-		var scene = GetTree().CurrentScene;
-		_player = scene.GetNode<PlayerController>("Player");
-		
+		// Find and connect to player
+		_player = GetTree().CurrentScene.GetNode<ModernPlayerController>("Player");
 		if (_player != null)
 		{
 			_player.HealthChanged += OnHealthChanged;
-			_player.AmmoChanged += OnAmmoChanged;
 			_player.PlayerDied += OnPlayerDied;
+			_player.PlayerRespawned += OnPlayerRespawned;
+			
+			// Connect to weapon system
+			var weaponSystem = _player.GetNode<ModernWeaponSystem>("CameraHolder/GunPoint/WeaponSystem");
+			if (weaponSystem != null)
+			{
+				weaponSystem.AmmoChanged += OnAmmoChanged;
+				weaponSystem.ReloadStarted += OnReloadStarted;
+				weaponSystem.ReloadCompleted += OnReloadCompleted;
+				weaponSystem.WeaponChanged += OnWeaponChanged;
+			}
+		}
+
+		// Connect to GameManager
+		if (GameManager.Instance != null)
+		{
+			GameManager.Instance.GameStateChanged += OnGameStateChanged;
+			GameManager.Instance.ScoreChanged += OnScoreChanged;
 		}
 	}
 
 	public override void _Input(InputEvent @event)
 	{
-		if (@event.IsActionPressed("ui_cancel")) // ESC key
+		if (@event.IsActionPressed("ui_cancel"))
 		{
-			GD.Print("ESC key pressed in UIManager!");
 			TogglePause();
 		}
 	}
 
-	public void TogglePause()
+	private void TogglePause()
 	{
-		_isPaused = !_isPaused;
-		_pauseMenu.Visible = _isPaused;
-		
-		GD.Print($"TogglePause called! Paused: {_isPaused}, Menu visible: {_pauseMenu.Visible}");
-		
-		GetTree().Paused = _isPaused;
-		
+		if (_isGameOver) return;
+
 		if (_isPaused)
 		{
-			Input.MouseMode = Input.MouseModeEnum.Visible;
-			EmitSignal(SignalName.GamePaused);
+			ResumeGame();
 		}
 		else
 		{
-			Input.MouseMode = Input.MouseModeEnum.Captured;
-			EmitSignal(SignalName.GameResumed);
+			PauseGame();
 		}
 	}
 
-	public void ShowReloadIndicator(bool show)
+	private void PauseGame()
 	{
-		_reloadLabel.Visible = show;
+		if (_isPaused) return;
+
+		_isPaused = true;
+		_pauseMenu.Visible = true;
+		GetTree().Paused = true;
+		Input.MouseMode = Input.MouseModeEnum.Visible;
+		EmitSignal(SignalName.GamePaused);
 	}
 
-	private void OnHealthChanged(int newHealth)
+	private void ResumeGame()
 	{
-		_healthBar.Value = newHealth;
-		_healthLabel.Text = $"{newHealth}/{_player.MaxHealth}";
+		if (!_isPaused) return;
+
+		_isPaused = false;
+		_pauseMenu.Visible = false;
+		_settingsMenu.Visible = false;
+		GetTree().Paused = false;
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		EmitSignal(SignalName.GameResumed);
+	}
+
+
+
+	private void OnHealthChanged(float health, float maxHealth)
+	{
+		_healthBar.MaxValue = maxHealth;
+		_healthBar.Value = health;
+		_healthLabel.Text = $"Health: {health:F0}/{maxHealth:F0}";
 		
-		// Change color based on health
-		if (newHealth < 30)
+		// Change color based on health percentage
+		var healthPercent = health / maxHealth;
+		if (healthPercent > 0.6f)
 		{
-			_healthBar.Modulate = Colors.Red;
+			_healthBar.Modulate = Colors.Green;
 		}
-		else if (newHealth < 60)
+		else if (healthPercent > 0.3f)
 		{
 			_healthBar.Modulate = Colors.Yellow;
 		}
 		else
 		{
-			_healthBar.Modulate = Colors.Green;
+			_healthBar.Modulate = Colors.Red;
 		}
 	}
 
 	private void OnAmmoChanged(int currentAmmo, int maxAmmo)
 	{
-		_ammoLabel.Text = $"{currentAmmo}/{maxAmmo}";
+		_ammoLabel.Text = $"Ammo: {currentAmmo}/{maxAmmo}";
 		
-		// Change color if low on ammo
-		if (currentAmmo <= 5)
-		{
-			_ammoLabel.Modulate = Colors.Red;
-		}
-		else
+		// Change color based on ammo level
+		var ammoPercent = (float)currentAmmo / maxAmmo;
+		if (ammoPercent > 0.3f)
 		{
 			_ammoLabel.Modulate = Colors.White;
 		}
-		
-		// Don't show reload indicator here - the weapon system will call ShowReloadIndicator directly
-		// when reload state changes via signals
+		else if (ammoPercent > 0.1f)
+		{
+			_ammoLabel.Modulate = Colors.Yellow;
+		}
+		else
+		{
+			_ammoLabel.Modulate = Colors.Red;
+		}
+	}
+
+	private void OnReloadStarted()
+	{
+		_reloadLabel.Text = "RELOADING...";
+		_reloadLabel.Visible = true;
+	}
+
+	private void OnReloadCompleted()
+	{
+		_reloadLabel.Visible = false;
+	}
+	
+	private void OnWeaponChanged(string weaponName)
+	{
+		// Could show weapon name in UI
+		GD.Print($"Weapon changed to: {weaponName}");
 	}
 
 	private void OnPlayerDied()
 	{
 		_isGameOver = true;
 		_gameOverScreen.Visible = true;
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		_pauseMenu.Visible = false;
 	}
 
+	private void OnPlayerRespawned()
+	{
+		_isGameOver = false;
+		_gameOverScreen.Visible = false;
+	}
+
+	private void OnGameStateChanged(GameState newState)
+	{
+		switch (newState)
+		{
+			case GameState.Paused:
+				_pauseMenu.Visible = true;
+				break;
+			case GameState.Playing:
+				_pauseMenu.Visible = false;
+				_settingsMenu.Visible = false;
+				break;
+			case GameState.GameOver:
+				_gameOverScreen.Visible = true;
+				break;
+		}
+	}
+
+	private void OnScoreChanged(int newScore)
+	{
+		// Could add score display here
+	}
+
+	// Button event handlers
 	private void OnResumePressed()
 	{
-		GD.Print("Resume button pressed!");
-		TogglePause();
+		ResumeGame();
 	}
 
 	private void OnSettingsPressed()
 	{
-		GD.Print("Settings button pressed!");
 		_pauseMenu.Visible = false;
 		_settingsMenu.Visible = true;
 	}
 
 	private void OnSettingsBackPressed()
 	{
-		GD.Print("Settings back button pressed!");
 		_settingsMenu.Visible = false;
 		_pauseMenu.Visible = true;
 	}
 
-	private void OnQuitPressed()
-	{
-		GD.Print("Quit button pressed!");
-		GetTree().Quit();
-	}
-
 	private void OnRespawnPressed()
 	{
-		GD.Print("Respawn button pressed!");
-		_isGameOver = false;
-		_gameOverScreen.Visible = false;
-		
-		if (_player != null)
-		{
-			_player.Respawn();
-		}
-		
-		Input.MouseMode = Input.MouseModeEnum.Captured;
+		GameManager.Instance?.StartNewGame();
+	}
+
+	private void OnQuitPressed()
+	{
+		GetTree().Quit();
 	}
 
 	private void OnSensitivityChanged(double value)
@@ -400,4 +464,4 @@ public partial class UIManager : Control
 			_player.MouseSensitivity = (float)value;
 		}
 	}
-} 
+}

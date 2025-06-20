@@ -1,10 +1,17 @@
-[gd_scene load_steps=16 format=3 uid="uid://c6m16dpjfbkr7"]
+[gd_scene load_steps=20 format=3 uid="uid://c6m16dpjfbkr7"]
 
-[ext_resource type="PackedScene" uid="uid://bfanuxdslh8fd" path="res://Prefabs/player.tscn" id="1_gjdyk"]
 [ext_resource type="PackedScene" uid="uid://cmegh4qfkepj" path="res://Prefabs/crosshair.tscn" id="3_8t5iv"]
 [ext_resource type="Texture2D" uid="uid://dn01k6s2jitl5" path="res://Textures/seamless_ground_texture_by_hhh316_d312eb5-fullview.jpg" id="3_lrus4"]
 [ext_resource type="Script" uid="uid://b1rpedmv1ehbi" path="res://Scripts/GameManager.cs" id="4_gmmgr"]
 [ext_resource type="Script" uid="uid://bn4d4h2d1irlr" path="res://Scripts/UIManager.cs" id="5_uimgr"]
+[ext_resource type="Script" uid="uid://c6p5gjujvu8lc" path="res://Scripts/Core/ModernPlayerController.cs" id="6_modern"]
+[ext_resource type="Script" uid="uid://c2hq1i4a2x40i" path="res://Scripts/Core/NetworkTick.cs" id="7_tick"]
+[ext_resource type="Script" uid="uid://di01ua6muwr5b" path="res://Scripts/Core/AuthoritativeServer.cs" id="8_server"]
+[ext_resource type="Script" uid="uid://i6pdxmosivqt" path="res://Scripts/Core/ClientPrediction.cs" id="9_prediction"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_modern"]
+radius = 0.3
+height = 1.8
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_p6gg1"]
 friction = 0.9
@@ -52,8 +59,25 @@ size = Vector3(1, 2, 8)
 
 [node name="Scene" type="Node3D"]
 
-[node name="Player" parent="." instance=ExtResource("1_gjdyk")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+[node name="NetworkSystems" type="Node" parent="."]
+
+[node name="NetworkTick" type="Node" parent="NetworkSystems"]
+script = ExtResource("7_tick")
+
+[node name="AuthoritativeServer" type="Node" parent="NetworkSystems"]
+script = ExtResource("8_server")
+
+[node name="ClientPrediction" type="Node" parent="NetworkSystems"]
+script = ExtResource("9_prediction")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+script = ExtResource("6_modern")
+NetworkId = 1
+PlayerName = "LocalPlayer"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_modern")
 
 [node name="Floor" type="StaticBody3D" parent="."]
 physics_material_override = SubResource("PhysicsMaterial_p6gg1")

@@ -20,15 +20,15 @@ public partial class ModernPlayerController : CharacterBody3D
 	// Movement Configuration
 	[Export] public float MoveSpeed = 5.0f;
 	[Export] public float RunSpeedMultiplier = 1.6f;
-	[Export] public float JumpForce = 6.0f;
-	[Export] public float Gravity = -20.0f;
+	[Export] public float JumpForce = 8.0f;
+	[Export] public float Gravity = 9.8f; // Positive value, will be applied downward
 	[Export] public float AirAcceleration = 2.0f;
 	[Export] public float GroundAcceleration = 10.0f;
 	[Export] public float Friction = 6.0f;
 	[Export] public float AirFriction = 0.2f;
 	
 	// Camera & Look
-	[Export] public float MouseSensitivity = 0.5f;
+	[Export] public float MouseSensitivity = 0.1f;
 	[Export] public float MaxLookAngle = 90.0f;
 	
 	// Health System
@@ -41,6 +41,8 @@ public partial class ModernPlayerController : CharacterBody3D
 	private Node3D _cameraHolder;
 	private MeshInstance3D _visualMesh;
 	private CollisionShape3D _collisionShape;
+	private ModernWeaponSystem _weaponSystem;
+	private Node3D _gunPoint;
 	
 	// State
 	private Vector3 _viewAngles = Vector3.Zero;
@@ -48,6 +50,10 @@ public partial class ModernPlayerController : CharacterBody3D
 	private bool _isDead = false;
 	private double _lastDamageTime = 0.0;
 	private bool _isLocalPlayer = false;
+	
+	// Movement state
+	private Vector3 _inputDirection = Vector3.Zero;
+	private bool _isRunning = false;
 	
 	// Network interpolation
 	private Vector3 _renderPosition;
@@ -64,6 +70,20 @@ public partial class ModernPlayerController : CharacterBody3D
 	
 	public override void _Ready()
 	{
+		// Player should pause when game is paused
+		ProcessMode = ProcessModeEnum.Pausable;
+		
+		// Determine if this is the local player first
+		if (Multiplayer.HasMultiplayerPeer())
+		{
+			var localId = Multiplayer.GetUniqueId();
+			_isLocalPlayer = (NetworkId == localId) || (NetworkId == 1 && localId == 1);
+		}
+		else
+		{
+			_isLocalPlayer = true; // Single player
+		}
+		
 		InitializeComponents();
 		InitializePlayer();
 		SetupNetwork();
@@ -71,9 +91,32 @@ public partial class ModernPlayerController : CharacterBody3D
 	
 	private void InitializeComponents()
 	{
+		// Check if collision shape already exists (from scene)
+		_collisionShape = GetNode<CollisionShape3D>("CollisionShape3D");
+		if (_collisionShape == null)
+		{
+			// Create collision shape only if it doesn't exist
+			SetupCollision();
+		}
+		else
+		{
+			GD.Print("Using existing collision shape from scene");
+			// For scene-based collision shapes, don't modify the position
+			// The scene should have the collision shape positioned correctly
+			var shape = _collisionShape.Shape as CapsuleShape3D;
+			if (shape != null)
+			{
+				GD.Print($"Scene collision shape - Height: {shape.Height}, Radius: {shape.Radius}, Position: {_collisionShape.Position}");
+			}
+		}
+		
+		// Don't force player position - let the scene determine initial position
+		// GlobalPosition = new Vector3(0, 0, 0);
+		
 		// Create camera holder for smooth rotation
 		_cameraHolder = new Node3D();
 		_cameraHolder.Name = "CameraHolder";
+		_cameraHolder.Position = new Vector3(0, 0.8f, 0); // Eye level height (lower than before)
 		AddChild(_cameraHolder);
 		
 		// Create camera
@@ -81,11 +124,26 @@ public partial class ModernPlayerController : CharacterBody3D
 		_camera.Name = "Camera";
 		_cameraHolder.AddChild(_camera);
 		
-		// Create visual representation
-		SetupVisualMesh();
+		// Create gun point for weapon positioning
+		_gunPoint = new Node3D();
+		_gunPoint.Name = "GunPoint";
+		_gunPoint.Position = new Vector3(0.3f, -0.2f, -0.5f); // Offset from camera
+		_cameraHolder.AddChild(_gunPoint);
 		
-		// Setup collision
-		SetupCollision();
+		// Create weapon system
+		_weaponSystem = new ModernWeaponSystem();
+		_weaponSystem.Name = "WeaponSystem";
+		_gunPoint.AddChild(_weaponSystem);
+		
+		// Manually initialize the weapon system immediately
+		// This ensures weapons are ready before any combat input
+		_weaponSystem.Initialize(this);
+		
+		// Create visual representation only for remote players
+		if (!_isLocalPlayer)
+		{
+			SetupVisualMesh();
+		}
 	}
 	
 	private void SetupVisualMesh()
@@ -96,9 +154,10 @@ public partial class ModernPlayerController : CharacterBody3D
 		// Create a simple capsule mesh for the player
 		var capsule = new CapsuleMesh();
 		capsule.Height = 1.8f;
+		capsule.RadialSegments = 8;
 		_visualMesh.Mesh = capsule;
 		
-		// Position mesh properly
+		// Position mesh to match collision shape
 		_visualMesh.Position = new Vector3(0, 0.9f, 0);
 		AddChild(_visualMesh);
 	}
@@ -113,8 +172,17 @@ public partial class ModernPlayerController : CharacterBody3D
 		capsuleShape.Radius = 0.3f;
 		_collisionShape.Shape = capsuleShape;
 		
-		_collisionShape.Position = new Vector3(0, 0.9f, 0);
+		// Position collision shape properly - the bottom of the capsule should touch the ground
+		// For a CharacterBody3D, position the shape so the bottom is at y=0
+		_collisionShape.Position = new Vector3(0, 0.9f, 0); // Half the height up from ground
 		AddChild(_collisionShape);
+		
+		// Set proper collision layers
+		SetCollisionLayer(1); // Player layer
+		SetCollisionMask(1);  // Collide with environment
+		
+		// Debug output
+		GD.Print($"Collision shape set up: Height={capsuleShape.Height}, Radius={capsuleShape.Radius}, Position={_collisionShape.Position}");
 	}
 	
 	private void InitializePlayer()
@@ -128,16 +196,7 @@ public partial class ModernPlayerController : CharacterBody3D
 	
 	private void SetupNetwork()
 	{
-		// Determine if this is the local player
-		if (Multiplayer.HasMultiplayerPeer())
-		{
-			var localId = Multiplayer.GetUniqueId();
-			_isLocalPlayer = (NetworkId == localId) || (NetworkId == 1 && localId == 1);
-		}
-		else
-		{
-			_isLocalPlayer = true; // Single player
-		}
+		// Local player determination is now done in _Ready()
 		
 		// Setup camera and input for local player
 		if (_isLocalPlayer)
@@ -154,11 +213,28 @@ public partial class ModernPlayerController : CharacterBody3D
 		else
 		{
 			_camera.Current = false;
-			// Hide visual mesh for remote players initially
+			// Show visual mesh for remote players
 			_visualMesh.Visible = true;
 		}
 		
+		// Connect weapon system events
+		if (_weaponSystem != null)
+		{
+			_weaponSystem.WeaponChanged += OnWeaponChanged;
+			_weaponSystem.AmmoChanged += OnAmmoChanged;
+			_weaponSystem.ReloadStarted += OnReloadStarted;
+			_weaponSystem.ReloadCompleted += OnReloadCompleted;
+			GD.Print("Weapon system events connected successfully");
+		}
+		else
+		{
+			GD.PrintErr("Failed to connect weapon system events - weapon system is null!");
+		}
+		
 		GD.Print($"Player {PlayerName} ({NetworkId}) initialized - Local: {_isLocalPlayer}");
+		GD.Print($"Weapon system: {(_weaponSystem != null ? "Ready" : "NULL")}");
+		GD.Print($"Gun point: {(_gunPoint != null ? "Ready" : "NULL")}");
+		GD.Print($"Camera: {(_camera != null ? "Ready" : "NULL")}");
 	}
 	
 	public override void _Input(InputEvent @event)
@@ -171,13 +247,57 @@ public partial class ModernPlayerController : CharacterBody3D
 			HandleMouseLook(mouseMotion);
 		}
 		
-		// Handle ESC to release mouse
-		if (@event.IsActionPressed("ui_cancel"))
+		// Handle weapon switching
+		HandleWeaponSwitching(@event);
+		
+		// Don't handle ESC here - let UIManager handle it
+		// This prevents conflicts with pause menu functionality
+	}
+	
+	private void HandleWeaponSwitching(InputEvent @event)
+	{
+		if (_weaponSystem == null) 
 		{
-			if (Input.MouseMode == Input.MouseModeEnum.Captured)
-				Input.MouseMode = Input.MouseModeEnum.Visible;
-			else
-				Input.MouseMode = Input.MouseModeEnum.Captured;
+			GD.PrintErr("Weapon system null during weapon switching!");
+			return;
+		}
+		
+		// Mouse wheel weapon switching
+		if (@event is InputEventMouseButton mouseButton && mouseButton.Pressed)
+		{
+			if (mouseButton.ButtonIndex == MouseButton.WheelUp)
+			{
+				_weaponSystem.SwitchToPreviousWeapon();
+				GD.Print("Switched to previous weapon");
+			}
+			else if (mouseButton.ButtonIndex == MouseButton.WheelDown)
+			{
+				_weaponSystem.SwitchToNextWeapon();
+				GD.Print("Switched to next weapon");
+			}
+		}
+		
+		// Number key weapon switching
+		for (int i = 1; i <= 5; i++)
+		{
+			if (@event.IsActionPressed($"weapon_{i}"))
+			{
+				_weaponSystem.SwitchToWeapon(i - 1);
+				GD.Print($"Switched to weapon {i}");
+				break;
+			}
+		}
+		
+		// Next/Previous weapon keys
+		if (@event.IsActionPressed("weapon_next"))
+		{
+			_weaponSystem.SwitchToNextWeapon();
+			GD.Print("Next weapon (Q key)");
+		}
+		else if (@event.IsActionPressed("weapon_prev"))
+		{
+			_weaponSystem.SwitchToPreviousWeapon();
+			GD.Print("Previous weapon (E key)");
 		}
 	}
 	
@@ -203,21 +323,205 @@ public partial class ModernPlayerController : CharacterBody3D
 		_cameraHolder.RotationDegrees = new Vector3(_viewAngles.X, 0, 0);
 	}
 	
-	public override void _PhysicsProcess(double delta)
+	public override void _Process(double delta)
 	{
 		if (_isDead) return;
 		
 		// Update health regeneration
 		UpdateHealthRegeneration(delta);
 		
+		// Handle input for local player (combat needs to be in _Process for responsiveness)
+		if (_isLocalPlayer)
+		{
+			HandleCombatInput();
+		}
+	}
+	
+	public override void _PhysicsProcess(double delta)
+	{
+		if (_isDead) return;
+		
+		// Handle movement for local player
+		if (_isLocalPlayer)
+		{
+			HandleMovementInput();
+			ApplyMovementPhysics(delta);
+		}
+		
 		// Handle interpolation for remote players
 		if (!_isLocalPlayer && _isInterpolating)
 		{
 			InterpolatePosition(delta);
 		}
+	}
+	
+	private void HandleMovementInput()
+	{
+		// Get input direction
+		var inputDirection2D = Vector2.Zero;
 		
-		// Local players handle movement through prediction system
-		// Remote players get their position from server updates
+		if (Input.IsActionPressed("move_forward"))
+			inputDirection2D.Y -= 1.0f;
+		if (Input.IsActionPressed("move_back"))
+			inputDirection2D.Y += 1.0f;
+		if (Input.IsActionPressed("move_left"))
+			inputDirection2D.X -= 1.0f;
+		if (Input.IsActionPressed("move_right"))
+			inputDirection2D.X += 1.0f;
+		
+		// Normalize diagonal movement and convert to Vector3
+		inputDirection2D = inputDirection2D.Normalized();
+		_inputDirection = new Vector3(inputDirection2D.X, 0, inputDirection2D.Y);
+		
+		// Check if running
+		_isRunning = Input.IsActionPressed("rush");
+	}
+	
+	private void ApplyMovementPhysics(double delta)
+	{
+		// Debug physics state
+		bool onFloor = IsOnFloor();
+		if (GetPhysicsProcessDeltaTime() > 0) // Only log occasionally
+		{
+			var frameCount = Engine.GetProcessFrames();
+			if (frameCount % 60 == 0) // Log every 60 frames (once per second at 60fps)
+			{
+				GD.Print($"Physics Debug - OnFloor: {onFloor}, Position: {GlobalPosition}, Velocity: {Velocity}");
+			}
+		}
+		
+		// Apply gravity
+		if (!onFloor)
+		{
+			var newVelocityY = Velocity.Y - Gravity * (float)delta;
+			Velocity = new Vector3(Velocity.X, newVelocityY, Velocity.Z);
+		}
+		else
+		{
+			// When on floor, reset Y velocity if it's negative
+			if (Velocity.Y < 0)
+			{
+				Velocity = new Vector3(Velocity.X, 0, Velocity.Z);
+			}
+		}
+		
+		// Handle jumping
+		if (Input.IsActionJustPressed("jump") && onFloor)
+		{
+			Velocity = new Vector3(Velocity.X, JumpForce, Velocity.Z);
+			GD.Print($"Jump! New velocity: {Velocity}");
+		}
+		
+		// Calculate movement
+		var transform = Transform;
+		var basis = transform.Basis;
+		
+		// Get movement direction relative to player rotation
+		var direction = (basis * _inputDirection).Normalized();
+		
+		// Calculate target speed
+		var targetSpeed = MoveSpeed;
+		if (_isRunning && IsOnFloor())
+		{
+			targetSpeed *= RunSpeedMultiplier;
+		}
+		
+		// Apply movement
+		if (IsOnFloor())
+		{
+			// Ground movement with acceleration and friction
+			if (direction != Vector3.Zero)
+			{
+				// Accelerate towards target velocity
+				var targetVelocity = direction * targetSpeed;
+				var currentHorizontal = new Vector3(Velocity.X, 0, Velocity.Z);
+				var newHorizontal = currentHorizontal.Lerp(targetVelocity, GroundAcceleration * (float)delta);
+				Velocity = new Vector3(newHorizontal.X, Velocity.Y, newHorizontal.Z);
+			}
+			else
+			{
+				// Apply friction when not moving
+				var currentHorizontal = new Vector3(Velocity.X, 0, Velocity.Z);
+				var newHorizontal = currentHorizontal.Lerp(Vector3.Zero, Friction * (float)delta);
+				Velocity = new Vector3(newHorizontal.X, Velocity.Y, newHorizontal.Z);
+			}
+		}
+		else
+		{
+			// Air movement with reduced control
+			if (direction != Vector3.Zero)
+			{
+				var targetVelocity = direction * targetSpeed;
+				var currentHorizontal = new Vector3(Velocity.X, 0, Velocity.Z);
+				var newHorizontal = currentHorizontal.Lerp(targetVelocity, AirAcceleration * (float)delta);
+				Velocity = new Vector3(newHorizontal.X, Velocity.Y, newHorizontal.Z);
+			}
+		}
+		
+		// Apply movement
+		MoveAndSlide();
+	}
+	
+	private void HandleCombatInput()
+	{
+		if (_weaponSystem == null) 
+		{
+			GD.PrintErr("Weapon system is null!");
+			return;
+		}
+		
+		// Handle shooting - same as old system
+		if (Input.IsActionPressed("shoot"))
+		{
+			// Check if weapon system is properly initialized
+			if (_weaponSystem.CurrentWeapon == null)
+			{
+				GD.PrintErr($"CurrentWeapon is null! Weapon count: {_weaponSystem.WeaponCount}, Current index: {_weaponSystem.CurrentWeaponIndex}");
+				return;
+			}
+			
+			if (_weaponSystem.CanFire())
+			{
+				var fireDirection = GetFireDirection();
+				var firePoint = _gunPoint?.GlobalPosition ?? _camera.GlobalPosition;
+				bool fired = _weaponSystem.TryFire(firePoint, fireDirection);
+				
+				if (!fired)
+				{
+					GD.Print("Failed to fire weapon!");
+				}
+			}
+			else
+			{
+				GD.Print($"Can't fire: weapon not ready or out of ammo. Weapon: {_weaponSystem.GetCurrentWeaponName()}, Ammo: {_weaponSystem.GetAmmoInfo().current}/{_weaponSystem.GetAmmoInfo().max}, Reloading: {_weaponSystem.IsReloading()}");
+			}
+		}
+		
+		// Handle reload - same as old system
+		if (Input.IsActionJustPressed("reload"))
+		{
+			if (_weaponSystem.CurrentWeapon == null)
+			{
+				GD.PrintErr("Cannot reload: CurrentWeapon is null!");
+				return;
+			}
+			
+			if (_weaponSystem.CanReload())
+			{
+				_weaponSystem.StartReload();
+				GD.Print("Starting reload...");
+			}
+			else
+			{
+				GD.Print("Can't reload: already reloading or ammo full");
+			}
+		}
+	}
+	
+	private Vector3 GetFireDirection()
+	{
+		// Get direction from camera forward
+		return -_camera.GlobalTransform.Basis.Z;
 	}
 	
 	private void UpdateHealthRegeneration(double delta)
@@ -325,7 +629,11 @@ public partial class ModernPlayerController : CharacterBody3D
 		_collisionShape.Disabled = true;
 		
 		// Visual effects for death
-		_visualMesh.MaterialOverride = new StandardMaterial3D { AlbedoColor = Colors.Red };
+		if (_visualMesh.MaterialOverride == null)
+		{
+			_visualMesh.MaterialOverride = new StandardMaterial3D();
+		}
+		((StandardMaterial3D)_visualMesh.MaterialOverride).AlbedoColor = Colors.Red;
 		
 		GD.Print($"Player {PlayerName} died!");
 	}
@@ -343,9 +651,18 @@ public partial class ModernPlayerController : CharacterBody3D
 		_collisionShape.Disabled = false;
 		
 		// Reset visual effects
-		_visualMesh.MaterialOverride = new StandardMaterial3D { AlbedoColor = Colors.White };
+		if (_visualMesh.MaterialOverride == null)
+		{
+			_visualMesh.MaterialOverride = new StandardMaterial3D();
+		}
+		((StandardMaterial3D)_visualMesh.MaterialOverride).AlbedoColor = Colors.White;
 		
 		GD.Print($"Player {PlayerName} respawned!");
+	}
+	
+	public void Respawn()
+	{
+		HandleRespawn();
 	}
 	
 	public new void SetPosition(Vector3 position)
@@ -436,5 +753,27 @@ public partial class ModernPlayerController : CharacterBody3D
 					HandleRespawn();
 			}
 		}
+	}
+	
+	// Weapon event handlers
+	private void OnWeaponChanged(string weaponName)
+	{
+		EmitSignal(SignalName.WeaponChanged, 0, weaponName); // Weapon index and name
+	}
+	
+	private void OnAmmoChanged(int currentAmmo, int maxAmmo)
+	{
+		// This will be connected to UI later
+		// For now, we'll let the UI connect directly to the weapon system
+	}
+	
+	private void OnReloadStarted()
+	{
+		// Weapon reload started
+	}
+	
+	private void OnReloadCompleted()
+	{
+		// Weapon reload completed
 	}
 } 

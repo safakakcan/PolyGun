@@ -28,9 +28,14 @@ public partial class GameManager : Node
 	[Export] public string SaveFileName = "polygun_save.dat";
 	
 	// References
-	private PlayerController _player;
+	private ModernPlayerController _player;
 	private UIManager _uiManager;
-	private List<PlayerController> _allPlayers = new List<PlayerController>();
+	private List<ModernPlayerController> _allPlayers = new List<ModernPlayerController>();
+	
+	// Network Systems
+	private AuthoritativeServer _server;
+	private ClientPrediction _clientPrediction;
+	private NetworkTick _networkTick;
 	
 	// Singleton pattern
 	public static GameManager Instance { get; private set; }
@@ -61,11 +66,16 @@ public partial class GameManager : Node
 	
 	private void InitializeGame()
 	{
+		// Initialize network systems first
+		InitializeNetworkSystems();
+		
 		// Find and setup player
-		_player = GetTree().CurrentScene.GetNode<PlayerController>("Player");
+		_player = GetTree().CurrentScene.GetNode<ModernPlayerController>("Player");
 		if (_player != null)
 		{
 			_player.PlayerDied += OnPlayerDied;
+			_player.PlayerRespawned += OnPlayerRespawned;
+			_player.HealthChanged += OnPlayerHealthChanged;
 			_allPlayers.Add(_player);
 		}
 		
@@ -79,6 +89,28 @@ public partial class GameManager : Node
 		
 		LoadGameSettings();
 		ChangeGameState(GameState.Playing);
+	}
+	
+	private void InitializeNetworkSystems()
+	{
+		// Get network system references
+		var networkSystems = GetTree().CurrentScene.GetNode("NetworkSystems");
+		if (networkSystems != null)
+		{
+			_networkTick = networkSystems.GetNode<NetworkTick>("NetworkTick");
+			_server = networkSystems.GetNode<AuthoritativeServer>("AuthoritativeServer");
+			_clientPrediction = networkSystems.GetNode<ClientPrediction>("ClientPrediction");
+			
+			// Connect to network events
+			if (_server != null)
+			{
+				_server.PlayerConnected += OnNetworkPlayerConnected;
+				_server.PlayerDisconnected += OnNetworkPlayerDisconnected;
+				_server.PlayerHit += OnNetworkPlayerHit;
+			}
+		}
+		
+		GD.Print("Network systems initialized");
 	}
 	
 	public override void _Process(double delta)
@@ -163,7 +195,7 @@ public partial class GameManager : Node
 		// Respawn player
 		if (_player != null)
 		{
-			_player.Respawn();
+			RespawnPlayer();
 		}
 		
 		ChangeGameState(GameState.Playing);
@@ -204,6 +236,17 @@ public partial class GameManager : Node
 		timer.Timeout += OnRespawnTimerTimeout;
 	}
 	
+	private void OnPlayerRespawned()
+	{
+		GD.Print("Player respawned!");
+	}
+	
+	private void OnPlayerHealthChanged(float health, float maxHealth)
+	{
+		// Forward health changes to UI
+		// UI Manager will handle this through direct connection
+	}
+	
 	private void OnRespawnTimerTimeout()
 	{
 		if (_currentState == GameState.GameOver)
@@ -214,10 +257,46 @@ public partial class GameManager : Node
 		else
 		{
 			// Auto-respawn
-			if (_player != null)
-			{
-				_player.Respawn();
-			}
+			RespawnPlayer();
+		}
+	}
+	
+	private void RespawnPlayer()
+	{
+		if (_player != null)
+		{
+			// Reset player to spawn position
+			var spawnPosition = GetSpawnPosition();
+			_player.SetPosition(spawnPosition);
+			_player.Heal(100.0f); // Full heal on respawn
+		}
+	}
+	
+	private Vector3 GetSpawnPosition()
+	{
+		// Simple spawn position logic - can be expanded
+		return new Vector3(0, 1, 0);
+	}
+	
+	// Network event handlers
+	private void OnNetworkPlayerConnected(int playerId)
+	{
+		GD.Print($"Network player connected: {playerId}");
+	}
+	
+	private void OnNetworkPlayerDisconnected(int playerId)
+	{
+		GD.Print($"Network player disconnected: {playerId}");
+	}
+	
+	private void OnNetworkPlayerHit(int shooterId, int targetId, Vector3 hitPoint, float damage)
+	{
+		GD.Print($"Player {targetId} hit by {shooterId} for {damage} damage at {hitPoint}");
+		
+		// Award points to shooter if it's the local player
+		if (_player != null && _player.NetworkId == shooterId)
+		{
+			AddScore((int)(damage * 2)); // 2 points per damage point
 		}
 	}
 	
@@ -238,7 +317,7 @@ public partial class GameManager : Node
 		var config = new ConfigFile();
 		
 		// Save player settings
-		config.SetValue("player", "mouse_sensitivity", Variant.From(_player?.MouseSensitivity ?? 0.1f));
+		config.SetValue("player", "mouse_sensitivity", Variant.From(_player?.MouseSensitivity ?? 0.5f));
 		config.SetValue("game", "score", Variant.From(_score));
 		config.SetValue("game", "high_score", Variant.From(GetHighScore()));
 		config.SetValue("game", "total_kills", Variant.From(GetTotalKills()));
@@ -265,7 +344,7 @@ public partial class GameManager : Node
 		// Apply loaded settings
 		if (_player != null)
 		{
-			_player.MouseSensitivity = config.GetValue("player", "mouse_sensitivity", 0.1f).AsSingle();
+			_player.MouseSensitivity = config.GetValue("player", "mouse_sensitivity", 0.5f).AsSingle();
 		}
 		
 		_score = config.GetValue("game", "score", 0).AsInt32();
