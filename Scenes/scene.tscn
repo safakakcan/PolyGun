@@ -1,28 +1,12 @@
-[gd_scene load_steps=18 format=3 uid="uid://c6m16dpjfbkr7"]
+[gd_scene load_steps=14 format=3 uid="uid://c6m16dpjfbkr7"]
 
 [ext_resource type="PackedScene" uid="uid://cmegh4qfkepj" path="res://Prefabs/crosshair.tscn" id="3_8t5iv"]
-[ext_resource type="Texture2D" uid="uid://dn01k6s2jitl5" path="res://Textures/seamless_ground_texture_by_hhh316_d312eb5-fullview.jpg" id="3_lrus4"]
 [ext_resource type="Script" uid="uid://b34l587xbkyi2" path="res://Scripts/Core/GameMain.cs" id="4_gmmgr"]
 [ext_resource type="Script" uid="uid://bgyr2akeoc1i4" path="res://Scripts/Core/MultiplayerGameManager.cs" id="5_uimgr"]
 [ext_resource type="Script" uid="uid://cdj2njbqhc8qq" path="res://Scripts/UI/GameHUD.cs" id="6_netmgr"]
 [ext_resource type="Script" uid="uid://djx6np2m0tnvj" path="res://Scripts/UI/MultiplayerLobbyUI.cs" id="7_multui"]
+[ext_resource type="PackedScene" uid="uid://d10cxvxepxb61" path="res://Meshes/Dust2.fbx" id="7_ubbiv"]
 [ext_resource type="Script" uid="uid://8kcoeoy0w7sx" path="res://Scripts/UI/SettingsUI.cs" id="8_settings"]
-
-[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_p6gg1"]
-friction = 0.9
-bounce = 0.1
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_8t5iv"]
-albedo_color = Color(0.76662, 0.76662, 0.76662, 1)
-albedo_texture = ExtResource("3_lrus4")
-metallic_specular = 0.0
-uv1_scale = Vector3(100, 100, 100)
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_gjdyk"]
-material = SubResource("StandardMaterial3D_8t5iv")
-size = Vector2(500, 500)
-
-[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_lrus4"]
 
 [sub_resource type="PhysicalSkyMaterial" id="PhysicalSkyMaterial_p6gg1"]
 
@@ -54,15 +38,6 @@ size = Vector3(1, 2, 8)
 
 [node name="Scene" type="Node3D"]
 script = ExtResource("4_gmmgr")
-
-[node name="Floor" type="StaticBody3D" parent="."]
-physics_material_override = SubResource("PhysicsMaterial_p6gg1")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
-mesh = SubResource("PlaneMesh_gjdyk")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
-shape = SubResource("WorldBoundaryShape3D_lrus4")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.399853, 0.916579, 0, -0.916579, 0.399853, 0, 11.3147, 0)
@@ -127,3 +102,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("8_settings")
+
+[node name="Dust2" parent="." instance=ExtResource("7_ubbiv")]
+transform = Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0)
