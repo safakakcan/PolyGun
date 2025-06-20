@@ -104,4 +104,4 @@ grow_vertical = 2
 script = ExtResource("8_settings")
 
 [node name="Dust2" parent="." instance=ExtResource("7_ubbiv")]
-transform = Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0)
+transform = Transform3D(0.496645, 0.0188295, -0.0114545, -0.0185899, 0.496676, 0.0104404, 0.0118394, -0.0100019, 0.496892, 0, 0, 0)
