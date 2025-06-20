@@ -1,13 +1,12 @@
-[gd_scene load_steps=19 format=3 uid="uid://c6m16dpjfbkr7"]
+[gd_scene load_steps=18 format=3 uid="uid://c6m16dpjfbkr7"]
 
-[ext_resource type="PackedScene" uid="uid://bfanuxdslh8fd" path="res://Prefabs/player.tscn" id="1_gjdyk"]
 [ext_resource type="PackedScene" uid="uid://cmegh4qfkepj" path="res://Prefabs/crosshair.tscn" id="3_8t5iv"]
 [ext_resource type="Texture2D" uid="uid://dn01k6s2jitl5" path="res://Textures/seamless_ground_texture_by_hhh316_d312eb5-fullview.jpg" id="3_lrus4"]
-[ext_resource type="Script" uid="uid://b1rpedmv1ehbi" path="res://Scripts/GameManager.cs" id="4_gmmgr"]
-[ext_resource type="Script" uid="uid://bn4d4h2d1irlr" path="res://Scripts/UIManager.cs" id="5_uimgr"]
-[ext_resource type="Script" uid="uid://j56hepusykru" path="res://Scripts/NetworkManager.cs" id="6_netmgr"]
-[ext_resource type="Script" uid="uid://ba0csqqmp6n0m" path="res://Scripts/MultiplayerUI.cs" id="7_multui"]
-[ext_resource type="Script" uid="uid://d1d5re0n25n2m" path="res://Scripts/PlayerSpawner.cs" id="8_spawn"]
+[ext_resource type="Script" uid="uid://b34l587xbkyi2" path="res://Scripts/Core/GameMain.cs" id="4_gmmgr"]
+[ext_resource type="Script" uid="uid://bgyr2akeoc1i4" path="res://Scripts/Core/MultiplayerGameManager.cs" id="5_uimgr"]
+[ext_resource type="Script" uid="uid://cdj2njbqhc8qq" path="res://Scripts/UI/GameHUD.cs" id="6_netmgr"]
+[ext_resource type="Script" uid="uid://djx6np2m0tnvj" path="res://Scripts/UI/MultiplayerLobbyUI.cs" id="7_multui"]
+[ext_resource type="Script" uid="uid://8kcoeoy0w7sx" path="res://Scripts/UI/SettingsUI.cs" id="8_settings"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_p6gg1"]
 friction = 0.9
@@ -54,6 +53,7 @@ adjustment_saturation = 1.25
 size = Vector3(1, 2, 8)
 
 [node name="Scene" type="Node3D"]
+script = ExtResource("4_gmmgr")
 
 [node name="Floor" type="StaticBody3D" parent="."]
 physics_material_override = SubResource("PhysicsMaterial_p6gg1")
@@ -93,22 +93,22 @@ mesh = SubResource("BoxMesh_lrus4")
 
 [node name="Crosshair" parent="." instance=ExtResource("3_8t5iv")]
 
-[node name="GameManager" type="Node" parent="."]
-script = ExtResource("4_gmmgr")
+[node name="GameMain" type="Node" parent="."]
 
-[node name="UIManager" type="Control" parent="."]
+[node name="MultiplayerGameManager" type="Node" parent="."]
+script = ExtResource("5_uimgr")
+
+[node name="GameHUD" type="Control" parent="."]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("5_uimgr")
-
-[node name="NetworkManager" type="Node" parent="."]
+mouse_filter = 2
 script = ExtResource("6_netmgr")
 
-[node name="MultiplayerUI" type="Control" parent="."]
+[node name="MultiplayerLobbyUI" type="Control" parent="."]
 visible = false
 layout_mode = 3
 anchors_preset = 15
@@ -118,7 +118,12 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("7_multui")
 
-[node name="PlayerSpawner" type="Node" parent="." node_paths=PackedStringArray("SpawnPoints")]
-script = ExtResource("8_spawn")
-PlayerScene = ExtResource("1_gjdyk")
-SpawnPoints = []
+[node name="SettingsUI" type="Control" parent="."]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("8_settings")

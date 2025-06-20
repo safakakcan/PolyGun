@@ -127,7 +127,7 @@ public partial class PooledBullet : Bullet, IPoolable
 	
 	private Vector3 _initialPosition;
 	private Vector3 _initialDirection;
-	private PlayerController _initialShooter;
+	private ModernPlayerController _initialShooter;
 
 	public override void _Ready()
 	{
@@ -196,7 +196,7 @@ public partial class PooledBullet : Bullet, IPoolable
 		OnBodyEntered(body);
 	}
 
-	private void HandlePlayerHit(PlayerController player)
+	private void HandlePlayerHit(ModernPlayerController player)
 	{
 		player.TakeDamage(Damage);
 		
@@ -247,7 +247,7 @@ public partial class PooledBullet : Bullet, IPoolable
 		AudioPool.Instance?.PlayOneShot3D(ImpactSound, GlobalPosition, GD.Randf() * 0.2f + 0.9f, -10f);
 	}
 
-	public void InitializePooled(Vector3 position, Vector3 direction, PlayerController shooter = null)
+	public void InitializePooled(Vector3 position, Vector3 direction, ModernPlayerController shooter = null)
 	{
 		GlobalPosition = position;
 		_direction = direction.Normalized();

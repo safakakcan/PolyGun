@@ -1,9 +1,9 @@
 [gd_scene load_steps=7 format=3 uid="uid://bfanuxdslh8fd"]
 
-[ext_resource type="Script" uid="uid://cu0pjwni668bc" path="res://Scripts/PlayerController.cs" id="1_psw0r"]
+[ext_resource type="Script" uid="uid://bmnvisr0pxb75" path="res://Scripts/PlayerController.cs" id="1_psw0r"]
 [ext_resource type="PackedScene" uid="uid://dnwt5jdixc0so" path="res://Prefabs/bullet.tscn" id="2_5wxv7"]
 [ext_resource type="AudioStream" uid="uid://clcq5siuyobto" path="res://Sounds/fire.wav" id="2_y5hcb"]
-[ext_resource type="Script" uid="uid://bhxcfasdpudog" path="res://Scripts/WeaponSystem.cs" id="4_weapn"]
+[ext_resource type="Script" uid="uid://dunallfa73ffr" path="res://Scripts/WeaponSystem.cs" id="4_weapn"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_gf2k1"]
 

@@ -11,7 +11,7 @@ public partial class Bullet : RigidBody3D
 	
 	protected bool _hasHit = false;
 	protected Vector3 _direction;
-	protected PlayerController _shooter;
+	protected ModernPlayerController _shooter;
 
 	public override void _Ready()
 	{
@@ -24,7 +24,7 @@ public partial class Bullet : RigidBody3D
 		LinearDamp = 0.1f;   // Air resistance
 	}
 
-	public void Initialize(Vector3 direction, PlayerController shooter = null)
+	public void Initialize(Vector3 direction, ModernPlayerController shooter = null)
 	{
 		_direction = direction.Normalized();
 		_shooter = shooter;
@@ -53,7 +53,7 @@ public partial class Bullet : RigidBody3D
 		_hasHit = true;
 		
 		// Handle different collision types
-		if (body is PlayerController player && player != _shooter)
+		if (body is ModernPlayerController player && player != _shooter)
 		{
 			HandlePlayerHit(player);
 		}
@@ -66,18 +66,13 @@ public partial class Bullet : RigidBody3D
 		DestroyBullet();
 	}
 
-	private void HandlePlayerHit(PlayerController player)
+	private void HandlePlayerHit(ModernPlayerController player)
 	{
 		player.TakeDamage(Damage);
 		
-		// Add slight knockback
+		// Add slight knockback (handled by player controller)
 		Vector3 knockback = _direction * 2f;
-		if (player.IsOnFloor())
-		{
-			knockback.Y = Mathf.Max(knockback.Y, 1f); // Minimum upward force
-		}
-		
-		player.Velocity += knockback;
+		// ModernPlayerController handles its own physics
 		
 		GD.Print($"Bullet hit {player.PlayerName} for {Damage} damage!");
 	}

@@ -1,466 +1,310 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
-public abstract partial class Weapon : Node3D
-{
-	[Export] public string WeaponName = "";
-	[Export] public int Damage = 15;
-	[Export] public int MaxAmmo = 30;
-	[Export] public float FireRate = 0.1f; // Time between shots
-	[Export] public float ReloadTime = 2.0f;
-	[Export] public float Range = 100f;
-	[Export] public float Spread = 0.05f;
-	[Export] public AudioStream FireSound;
-	[Export] public AudioStream ReloadSound;
-	[Export] public AudioStream EmptySound;
-	[Export] public PackedScene BulletScene;
-	
-	protected int _currentAmmo;
-	protected bool _isReloading;
-	protected double _lastFireTime;
-	protected double _reloadStartTime;
-	
-	[Signal] public delegate void AmmoChangedEventHandler(int currentAmmo, int maxAmmo);
-	[Signal] public delegate void ReloadStartedEventHandler();
-	[Signal] public delegate void ReloadCompletedEventHandler();
-	
-	public int CurrentAmmo => _currentAmmo;
-	public bool IsReloading => _isReloading;
-	public bool CanFire => !_isReloading && _currentAmmo > 0 && Time.GetUnixTimeFromSystem() - _lastFireTime >= FireRate;
-	public bool CanReload => !_isReloading && _currentAmmo < MaxAmmo;
-	
-	public override void _Ready()
-	{
-		_currentAmmo = MaxAmmo;
-		EmitSignal(SignalName.AmmoChanged, _currentAmmo, MaxAmmo);
-	}
-	
-	public override void _Process(double delta)
-	{
-		UpdateReload();
-	}
-	
-	protected virtual void UpdateReload()
-	{
-		if (_isReloading && Time.GetUnixTimeFromSystem() - _reloadStartTime >= ReloadTime)
-		{
-			CompleteReload();
-		}
-	}
-	
-	public virtual bool TryFire(Vector3 firePoint, Vector3 direction, PlayerController shooter = null)
-	{
-		if (!CanFire) return false;
-		
-		Fire(firePoint, direction, shooter);
-		_currentAmmo--;
-		_lastFireTime = Time.GetUnixTimeFromSystem();
-		
-		EmitSignal(SignalName.AmmoChanged, _currentAmmo, MaxAmmo);
-		
-		if (_currentAmmo <= 0)
-		{
-			StartReload();
-		}
-		
-		return true;
-	}
-	
-	protected abstract void Fire(Vector3 firePoint, Vector3 direction, PlayerController shooter);
-	
-	public virtual void StartReload()
-	{
-		if (!CanReload) return;
-		
-		_isReloading = true;
-		_reloadStartTime = Time.GetUnixTimeFromSystem();
-		EmitSignal(SignalName.ReloadStarted);
-		
-		PlaySound(ReloadSound);
-	}
-	
-	protected virtual void CompleteReload()
-	{
-		_isReloading = false;
-		_currentAmmo = MaxAmmo;
-		EmitSignal(SignalName.AmmoChanged, _currentAmmo, MaxAmmo);
-		EmitSignal(SignalName.ReloadCompleted);
-	}
-	
-	protected virtual void PlaySound(AudioStream sound, float pitch = 1.0f)
-	{
-		if (sound == null) return;
-		
-		// Use audio pool for better performance
-		AudioPool.Instance?.PlayOneShot3D(sound, GlobalPosition, pitch, 0f);
-	}
-	
-	protected Vector3 ApplySpread(Vector3 direction)
-	{
-		Vector3 spread = new Vector3(
-			(GD.Randf() - 0.5f) * Spread,
-			(GD.Randf() - 0.5f) * Spread,
-			(GD.Randf() - 0.5f) * Spread
-		);
-		
-		return (direction + spread).Normalized();
-	}
-}
-
-public partial class AssaultRifle : Weapon
-{
-	public override void _Ready()
-	{
-		WeaponName = "Assault Rifle";
-		Damage = 15;
-		MaxAmmo = 30;
-		FireRate = 0.1f;
-		ReloadTime = 2.0f;
-		Spread = 0.05f;
-		
-		base._Ready();
-	}
-	
-	protected override void Fire(Vector3 firePoint, Vector3 direction, PlayerController shooter)
-	{
-		CreateBullet(firePoint, ApplySpread(direction), shooter);
-		PlaySound(FireSound, GD.Randf() * 0.1f + 0.95f);
-	}
-	
-	private void CreateBullet(Vector3 position, Vector3 direction, PlayerController shooter)
-	{
-		if (BulletScene == null) return;
-		
-		var bullet = (Bullet)BulletScene.Instantiate();
-		bullet.GlobalPosition = position;
-		bullet.Initialize(direction, shooter);
-		bullet.Damage = Damage;
-		
-		GetTree().Root.AddChild(bullet);
-	}
-}
-
-public partial class Shotgun : Weapon
-{
-	[Export] public int PelletCount = 8;
-	[Export] public float PelletSpread = 0.15f;
-	
-	public override void _Ready()
-	{
-		WeaponName = "Shotgun";
-		Damage = 8; // Per pellet
-		MaxAmmo = 8;
-		FireRate = 0.8f; // Slower fire rate
-		ReloadTime = 3.0f; // Longer reload
-		
-		base._Ready();
-	}
-	
-	protected override void Fire(Vector3 firePoint, Vector3 direction, PlayerController shooter)
-	{
-		// Fire multiple pellets
-		for (int i = 0; i < PelletCount; i++)
-		{
-			Vector3 pelletDirection = ApplyPelletSpread(direction);
-			CreateBullet(firePoint, pelletDirection, shooter);
-		}
-		
-		PlaySound(FireSound, GD.Randf() * 0.1f + 0.95f);
-	}
-	
-	private Vector3 ApplyPelletSpread(Vector3 direction)
-	{
-		Vector3 spread = new Vector3(
-			(GD.Randf() - 0.5f) * PelletSpread,
-			(GD.Randf() - 0.5f) * PelletSpread,
-			(GD.Randf() - 0.5f) * PelletSpread
-		);
-		
-		return (direction + spread).Normalized();
-	}
-	
-	private void CreateBullet(Vector3 position, Vector3 direction, PlayerController shooter)
-	{
-		if (BulletScene == null) return;
-		
-		var bullet = (Bullet)BulletScene.Instantiate();
-		bullet.GlobalPosition = position;
-		bullet.Initialize(direction, shooter);
-		bullet.Damage = Damage; // Each pellet does individual damage
-		
-		GetTree().Root.AddChild(bullet);
-	}
-}
-
+/// <summary>
+/// Modular weapon system for handling multiple weapon types
+/// Integrates with the networking system for multiplayer gameplay
+/// </summary>
 public partial class WeaponSystem : Node3D
 {
-	[Export] public PackedScene[] WeaponScenes;
+	[Signal] public delegate void WeaponFiredEventHandler(Vector3 origin, Vector3 direction);
+	[Signal] public delegate void WeaponChangedEventHandler(int weaponIndex, string weaponName);
+	[Signal] public delegate void AmmoChangedEventHandler(int currentAmmo, int totalAmmo);
 	
-	private List<Weapon> _weapons = new List<Weapon>();
-	private int _currentWeaponIndex = 0;
-	private Weapon _currentWeapon;
-	private PlayerController _player;
+	// Weapon configuration
+	[Export] public PackedScene BulletScene;
+	[Export] public AudioStream FireSound;
+	[Export] public int InitialAmmo = 120;
 	
-	[Signal] public delegate void WeaponChangedEventHandler(string weaponName);
+	// Weapon definitions
+	private List<WeaponData> _weapons = new();
+	private int _currentWeapon = 0;
+	private ModernPlayerController _player;
+	private Node3D _firePoint;
+	private AudioStreamPlayer3D _audioPlayer;
 	
-	public Weapon CurrentWeapon => _currentWeapon;
-	public int CurrentWeaponIndex => _currentWeaponIndex;
-	public int WeaponCount => _weapons.Count;
+	// Fire rate limiting
+	private double _lastFireTime = 0.0;
+	private bool _isReloading = false;
+	private double _reloadStartTime = 0.0;
 	
 	public override void _Ready()
 	{
-		_player = GetParent<PlayerController>();
+		_player = GetParent<ModernPlayerController>();
+		
+		// Find fire point
+		_firePoint = GetParent().GetNode<Node3D>("GunPoint");
+		if (_firePoint == null)
+		{
+			// Create fire point if it doesn't exist
+			_firePoint = new Node3D();
+			_firePoint.Name = "GunPoint";
+			_firePoint.Position = new Vector3(0, 1.6f, -0.5f);
+			GetParent().AddChild(_firePoint);
+		}
+		
+		// Find audio player
+		_audioPlayer = _firePoint.GetNode<AudioStreamPlayer3D>("AudioStreamPlayer3D");
+		if (_audioPlayer == null)
+		{
+			_audioPlayer = new AudioStreamPlayer3D();
+			_audioPlayer.Name = "AudioStreamPlayer3D";
+			_firePoint.AddChild(_audioPlayer);
+		}
+		
 		InitializeWeapons();
 	}
 	
 	private void InitializeWeapons()
 	{
-		// If no weapon scenes are configured, create default weapons
-		if (WeaponScenes == null || WeaponScenes.Length == 0)
+		// Create default weapons
+		_weapons.Add(new WeaponData
 		{
-			CreateDefaultWeapons();
+			Name = "Assault Rifle",
+			Damage = 25,
+			FireRate = 0.1f, // 10 rounds per second
+			MaxAmmo = 30,
+			CurrentAmmo = 30,
+			ReloadTime = 2.5f,
+			Range = 1000f,
+			Spread = 2f
+		});
+		
+		_weapons.Add(new WeaponData
+		{
+			Name = "Shotgun",
+			Damage = 15, // Per pellet
+			FireRate = 0.8f, // Slower fire rate
+			MaxAmmo = 8,
+			CurrentAmmo = 8,
+			ReloadTime = 3.0f,
+			Range = 50f,
+			Spread = 15f,
+			PelletCount = 6
+		});
+		
+		// Initialize total ammo
+		foreach (var weapon in _weapons)
+		{
+			weapon.TotalAmmo = InitialAmmo;
 		}
-		else
+		
+		EmitSignal(SignalName.WeaponChanged, _currentWeapon, _weapons[_currentWeapon].Name);
+		EmitSignal(SignalName.AmmoChanged, _weapons[_currentWeapon].CurrentAmmo, _weapons[_currentWeapon].TotalAmmo);
+	}
+	
+	public void HandleFire()
+	{
+		if (!CanFire()) return;
+		
+		var weapon = _weapons[_currentWeapon];
+		var currentTime = Time.GetUnixTimeFromSystem();
+		
+		// Check fire rate
+		if (currentTime - _lastFireTime < weapon.FireRate) return;
+		_lastFireTime = currentTime;
+		
+		// Fire the weapon
+		FireWeapon(weapon);
+		
+		// Consume ammo
+		weapon.CurrentAmmo--;
+		EmitSignal(SignalName.AmmoChanged, weapon.CurrentAmmo, weapon.TotalAmmo);
+		
+		// Auto-reload if empty
+		if (weapon.CurrentAmmo <= 0 && weapon.TotalAmmo > 0)
 		{
-			// Instantiate all weapons from scenes
-			foreach (var weaponScene in WeaponScenes)
+			StartReload();
+		}
+	}
+	
+	private void FireWeapon(WeaponData weapon)
+	{
+		var fireOrigin = _firePoint.GlobalPosition;
+		var fireDirection = -_firePoint.GlobalTransform.Basis.Z; // Forward direction
+		
+		// Add spread
+		if (weapon.Spread > 0)
+		{
+			var spreadX = (GD.Randf() - 0.5f) * weapon.Spread * Mathf.Pi / 180.0f;
+			var spreadY = (GD.Randf() - 0.5f) * weapon.Spread * Mathf.Pi / 180.0f;
+			
+			var spreadRotation = Basis.Identity.Rotated(Vector3.Up, spreadX).Rotated(Vector3.Right, spreadY);
+			fireDirection = spreadRotation * fireDirection;
+		}
+		
+		// Handle multiple pellets for shotgun
+		int pelletCount = weapon.PelletCount > 0 ? weapon.PelletCount : 1;
+		
+		for (int i = 0; i < pelletCount; i++)
+		{
+			var pelletDirection = fireDirection;
+			
+			// Add additional spread for multiple pellets
+			if (pelletCount > 1)
 			{
-				if (weaponScene != null)
+				var pelletSpreadX = (GD.Randf() - 0.5f) * weapon.Spread * Mathf.Pi / 180.0f;
+				var pelletSpreadY = (GD.Randf() - 0.5f) * weapon.Spread * Mathf.Pi / 180.0f;
+				var pelletSpreadRotation = Basis.Identity.Rotated(Vector3.Up, pelletSpreadX).Rotated(Vector3.Right, pelletSpreadY);
+				pelletDirection = pelletSpreadRotation * pelletDirection;
+			}
+			
+			// Create bullet
+			if (BulletScene != null)
+			{
+				var bullet = BulletScene.Instantiate() as Bullet;
+				if (bullet != null)
 				{
-					var weapon = (Weapon)weaponScene.Instantiate();
-					AddChild(weapon);
-					_weapons.Add(weapon);
-					weapon.Visible = false;
-					
-					// Connect weapon signals
-					weapon.AmmoChanged += OnWeaponAmmoChanged;
-					weapon.ReloadStarted += OnWeaponReloadStarted;
-					weapon.ReloadCompleted += OnWeaponReloadCompleted;
+					GetTree().Root.AddChild(bullet);
+					bullet.GlobalPosition = fireOrigin;
+					bullet.Initialize(pelletDirection, _player);
+					bullet.Damage = weapon.Damage;
+				}
+			}
+			else if (BulletPool.Instance != null)
+			{
+				// Use object pool if available
+				var bullet = BulletPool.Instance.GetBullet();
+				if (bullet != null)
+				{
+					bullet.GlobalPosition = fireOrigin;
+					bullet.InitializePooled(fireOrigin, pelletDirection, _player);
+					bullet.Damage = weapon.Damage;
 				}
 			}
 		}
 		
-		// Set initial weapon
-		if (_weapons.Count > 0)
+		// Play fire sound
+		if (FireSound != null && _audioPlayer != null)
 		{
-			SwitchToWeapon(0);
+			_audioPlayer.Stream = FireSound;
+			_audioPlayer.PitchScale = GD.Randf() * 0.2f + 0.9f; // Slight pitch variation
+			_audioPlayer.Play();
+		}
+		else if (AudioPool.Instance != null && FireSound != null)
+		{
+			AudioPool.Instance.PlayOneShot3D(FireSound, fireOrigin, GD.Randf() * 0.2f + 0.9f);
+		}
+		
+		// Emit signal for networking
+		EmitSignal(SignalName.WeaponFired, fireOrigin, fireDirection);
+	}
+	
+	public void HandleReload()
+	{
+		if (!CanReload()) return;
+		StartReload();
+	}
+	
+	private void StartReload()
+	{
+		if (_isReloading) return;
+		
+		var weapon = _weapons[_currentWeapon];
+		if (weapon.CurrentAmmo >= weapon.MaxAmmo || weapon.TotalAmmo <= 0) return;
+		
+		_isReloading = true;
+		_reloadStartTime = Time.GetUnixTimeFromSystem();
+		
+		GD.Print($"Reloading {weapon.Name}...");
+	}
+	
+	public void SwitchWeapon(int weaponIndex)
+	{
+		if (weaponIndex < 0 || weaponIndex >= _weapons.Count) return;
+		if (weaponIndex == _currentWeapon) return;
+		
+		_currentWeapon = weaponIndex;
+		_isReloading = false; // Cancel reload when switching
+		
+		EmitSignal(SignalName.WeaponChanged, _currentWeapon, _weapons[_currentWeapon].Name);
+		EmitSignal(SignalName.AmmoChanged, _weapons[_currentWeapon].CurrentAmmo, _weapons[_currentWeapon].TotalAmmo);
+		
+		GD.Print($"Switched to {_weapons[_currentWeapon].Name}");
+	}
+	
+	public void NextWeapon()
+	{
+		var nextIndex = (_currentWeapon + 1) % _weapons.Count;
+		SwitchWeapon(nextIndex);
+	}
+	
+	public void PreviousWeapon()
+	{
+		var prevIndex = (_currentWeapon - 1 + _weapons.Count) % _weapons.Count;
+		SwitchWeapon(prevIndex);
+	}
+	
+	public override void _Process(double delta)
+	{
+		// Handle reload completion
+		if (_isReloading)
+		{
+			var weapon = _weapons[_currentWeapon];
+			if (Time.GetUnixTimeFromSystem() - _reloadStartTime >= weapon.ReloadTime)
+			{
+				CompleteReload();
+			}
 		}
 	}
 	
-	private void CreateDefaultWeapons()
+	private void CompleteReload()
 	{
-		// Create default Assault Rifle
-		var assaultRifle = new AssaultRifle();
-		assaultRifle.BulletScene = _player?.BulletScene; // Use player's bullet scene if available
-		assaultRifle.FireSound = _player?.FireSound; // Use player's fire sound if available
-		AddChild(assaultRifle);
-		_weapons.Add(assaultRifle);
-		assaultRifle.Visible = false;
+		_isReloading = false;
+		var weapon = _weapons[_currentWeapon];
 		
-		// Connect weapon signals
-		assaultRifle.AmmoChanged += OnWeaponAmmoChanged;
-		assaultRifle.ReloadStarted += OnWeaponReloadStarted;
-		assaultRifle.ReloadCompleted += OnWeaponReloadCompleted;
+		var ammoNeeded = weapon.MaxAmmo - weapon.CurrentAmmo;
+		var ammoToReload = Mathf.Min(ammoNeeded, weapon.TotalAmmo);
 		
-		// Create default Shotgun
-		var shotgun = new Shotgun();
-		shotgun.BulletScene = _player?.BulletScene; // Use player's bullet scene if available
-		shotgun.FireSound = _player?.FireSound; // Use player's fire sound if available
-		AddChild(shotgun);
-		_weapons.Add(shotgun);
-		shotgun.Visible = false;
+		weapon.CurrentAmmo += ammoToReload;
+		weapon.TotalAmmo -= ammoToReload;
 		
-		// Connect weapon signals
-		shotgun.AmmoChanged += OnWeaponAmmoChanged;
-		shotgun.ReloadStarted += OnWeaponReloadStarted;
-		shotgun.ReloadCompleted += OnWeaponReloadCompleted;
-		
-		GD.Print("Created default weapons: Assault Rifle and Shotgun");
+		EmitSignal(SignalName.AmmoChanged, weapon.CurrentAmmo, weapon.TotalAmmo);
+		GD.Print($"{weapon.Name} reloaded!");
 	}
 	
-	public void SwitchToWeapon(int index)
+	private bool CanFire()
 	{
-		if (index < 0 || index >= _weapons.Count) return;
+		if (_isReloading) return false;
+		if (_player?.IsDead == true) return false;
 		
-		// Hide current weapon
-		if (_currentWeapon != null)
-		{
-			_currentWeapon.Visible = false;
-		}
+		var weapon = _weapons[_currentWeapon];
+		return weapon.CurrentAmmo > 0;
+	}
+	
+	private bool CanReload()
+	{
+		if (_isReloading) return false;
+		if (_player?.IsDead == true) return false;
 		
-		// Switch to new weapon
-		_currentWeaponIndex = index;
-		_currentWeapon = _weapons[_currentWeaponIndex];
-		_currentWeapon.Visible = true;
-		
-		EmitSignal(SignalName.WeaponChanged, _currentWeapon.WeaponName);
-		
-		// Update UI
-		if (_player != null)
-		{
-			_player.EmitSignal(PlayerController.SignalName.AmmoChanged, 
-							  _currentWeapon.CurrentAmmo, _currentWeapon.MaxAmmo);
-		}
+		var weapon = _weapons[_currentWeapon];
+		return weapon.CurrentAmmo < weapon.MaxAmmo && weapon.TotalAmmo > 0;
 	}
 	
-	public void SwitchToNextWeapon()
-	{
-		if (_weapons.Count == 0) return;
-		
-		int nextIndex = (_currentWeaponIndex + 1) % _weapons.Count;
-		SwitchToWeapon(nextIndex);
-	}
-	
-	public void SwitchToPreviousWeapon()
-	{
-		if (_weapons.Count == 0) return;
-		
-		int prevIndex = (_currentWeaponIndex - 1 + _weapons.Count) % _weapons.Count;
-		SwitchToWeapon(prevIndex);
-	}
-	
-	public bool TryFire(Vector3 firePoint, Vector3 direction)
-	{
-		if (_currentWeapon == null) return false;
-		
-		return _currentWeapon.TryFire(firePoint, direction, _player);
-	}
-	
-	public void Reload()
-	{
-		_currentWeapon?.StartReload();
-	}
-	
-	public bool CanFire()
-	{
-		return _currentWeapon?.CanFire ?? false;
-	}
-	
-	public bool CanReload()
-	{
-		return _currentWeapon?.CanReload ?? false;
-	}
-	
-	public bool IsReloading()
-	{
-		return _currentWeapon?.IsReloading ?? false;
-	}
-	
-	private void OnWeaponAmmoChanged(int currentAmmo, int maxAmmo)
-	{
-		if (_player != null)
-		{
-			_player.EmitSignal(PlayerController.SignalName.AmmoChanged, currentAmmo, maxAmmo);
-		}
-	}
-	
-	private void OnWeaponReloadStarted()
-	{
-		GD.Print($"Reloading {_currentWeapon.WeaponName}...");
-	}
-	
-	private void OnWeaponReloadCompleted()
-	{
-		GD.Print($"{_currentWeapon.WeaponName} reload complete!");
-	}
+	// Public getters
+	public string GetCurrentWeaponName() => _weapons[_currentWeapon].Name;
+	public int GetCurrentAmmo() => _weapons[_currentWeapon].CurrentAmmo;
+	public int GetTotalAmmo() => _weapons[_currentWeapon].TotalAmmo;
+	public bool IsReloading() => _isReloading;
+	public int GetWeaponCount() => _weapons.Count;
+	public int GetCurrentWeaponIndex() => _currentWeapon;
 }
 
+/// <summary>
+/// Data structure for weapon properties
+/// </summary>
 [System.Serializable]
-public class WeaponAttachment
+public class WeaponData
 {
-	public string Name;
-	public WeaponAttachmentType Type;
-	public float DamageModifier = 1.0f;
-	public float AccuracyModifier = 1.0f;
-	public float FireRateModifier = 1.0f;
-	public float ReloadSpeedModifier = 1.0f;
-}
-
-public enum WeaponAttachmentType
-{
-	Scope,
-	Barrel,
-	Grip,
-	Magazine
-}
-
-public partial class AdvancedWeapon : Weapon
-{
-	// Note: Cannot export custom arrays in Godot, use code initialization instead
-	public WeaponAttachment[] AvailableAttachments;
-	private List<WeaponAttachment> _equippedAttachments = new List<WeaponAttachment>();
-	
-	[Export] public int BaseExperience = 0;
-	[Export] public int CurrentExperience = 0;
-	[Export] public int ExperienceToNextLevel = 100;
-	[Export] public int WeaponLevel = 1;
-	
-	public float EffectiveDamage => Damage * GetAttachmentModifier(WeaponAttachmentType.Barrel);
-	public float EffectiveAccuracy => (1.0f / Spread) * GetAttachmentModifier(WeaponAttachmentType.Scope);
-	public float EffectiveFireRate => FireRate / GetAttachmentModifier(WeaponAttachmentType.Grip);
-	
-	public void EquipAttachment(WeaponAttachment attachment)
-	{
-		// Remove existing attachment of same type
-		_equippedAttachments.RemoveAll(a => a.Type == attachment.Type);
-		_equippedAttachments.Add(attachment);
-		UpdateWeaponStats();
-	}
-	
-	public void AddExperience(int amount)
-	{
-		CurrentExperience += amount;
-		CheckLevelUp();
-	}
-	
-	private void CheckLevelUp()
-	{
-		while (CurrentExperience >= ExperienceToNextLevel)
-		{
-			WeaponLevel++;
-			CurrentExperience -= ExperienceToNextLevel;
-			ExperienceToNextLevel = Mathf.RoundToInt(ExperienceToNextLevel * 1.2f);
-			GD.Print($"{WeaponName} leveled up to {WeaponLevel}!");
-		}
-	}
-	
-	private float GetAttachmentModifier(WeaponAttachmentType type)
-	{
-		var attachment = _equippedAttachments.FirstOrDefault(a => a.Type == type);
-		return type switch
-		{
-			WeaponAttachmentType.Scope => attachment?.AccuracyModifier ?? 1.0f,
-			WeaponAttachmentType.Barrel => attachment?.DamageModifier ?? 1.0f,
-			WeaponAttachmentType.Grip => attachment?.FireRateModifier ?? 1.0f,
-			WeaponAttachmentType.Magazine => attachment?.ReloadSpeedModifier ?? 1.0f,
-			_ => 1.0f
-		};
-	}
-	
-	private void UpdateWeaponStats()
-	{
-		// Update weapon properties based on attachments
-		// This would trigger UI updates and visual changes
-	}
-	
-	protected override void Fire(Vector3 firePoint, Vector3 direction, PlayerController shooter)
-	{
-		// Default implementation for advanced weapon
-		CreateBullet(firePoint, ApplySpread(direction), shooter);
-		PlaySound(FireSound, GD.Randf() * 0.1f + 0.95f);
-	}
-	
-	private void CreateBullet(Vector3 position, Vector3 direction, PlayerController shooter)
-	{
-		if (BulletScene == null) return;
-		
-		var bullet = (Bullet)BulletScene.Instantiate();
-		bullet.GlobalPosition = position;
-		bullet.Initialize(direction, shooter);
-		bullet.Damage = (int)EffectiveDamage; // Use effective damage with attachments
-		
-		GetTree().Root.AddChild(bullet);
-	}
+	public string Name = "";
+	public int Damage = 25;
+	public float FireRate = 0.1f; // Seconds between shots
+	public int MaxAmmo = 30;
+	public int CurrentAmmo = 30;
+	public int TotalAmmo = 120;
+	public float ReloadTime = 2.5f;
+	public float Range = 1000f;
+	public float Spread = 2f; // Degrees
+	public int PelletCount = 1; // For shotguns
 } 

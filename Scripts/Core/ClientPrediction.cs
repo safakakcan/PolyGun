@@ -119,8 +119,8 @@ public partial class ClientPrediction : Node
 			command.UpMovement = -1.0f;
 		
 		// Capture buttons
-		command.SetButton(PlayerButtons.Fire, Input.IsActionPressed("shoot"));
-		command.SetButton(PlayerButtons.AltFire, Input.IsActionPressed("alt_fire"));
+		command.SetButton(PlayerButtons.Fire, Input.IsActionPressed("shoot") || Input.IsActionPressed("fire"));
+		command.SetButton(PlayerButtons.AltFire, Input.IsActionPressed("alt_fire") || Input.IsActionPressed("aim"));
 		command.SetButton(PlayerButtons.Reload, Input.IsActionJustPressed("reload"));
 		command.SetButton(PlayerButtons.Jump, Input.IsActionJustPressed("jump"));
 		command.SetButton(PlayerButtons.Crouch, Input.IsActionPressed("crouch"));
