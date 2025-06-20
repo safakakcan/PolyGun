@@ -60,8 +60,42 @@ public partial class PlayerController : CharacterBody3D
 	private int _networkWeaponIndex;
 	private int _networkHealth;
 
-	// Network authority check
-	public bool IsNetworkOwner => Multiplayer.GetUniqueId() == NetworkId || (NetworkId == 0 && IsLocal);
+	// Client-side prediction
+	private Vector3 _lastSentPosition;
+	private Vector3 _lastSentRotation;
+	private double _lastSyncTime;
+	private const double SyncInterval = 1.0 / 20.0; // 20Hz sync rate
+
+	// Network authority check - Enhanced for server host
+	public bool IsNetworkOwner 
+	{
+		get
+		{
+			if (!NetworkManager.Instance?.IsOnline == true)
+				return IsLocal; // Single player
+				
+			var multiplayerId = Multiplayer.GetUniqueId();
+			
+			// Server host case: server ID is 1, and this player is the host
+			if (NetworkManager.Instance.IsServer && NetworkId == 1 && multiplayerId == 1)
+				return true;
+				
+			// Regular client case: multiplayer ID matches network ID
+			return multiplayerId == NetworkId;
+		}
+	}
+
+	// Local player check - for input and camera control
+	public bool IsLocalPlayer
+	{
+		get
+		{
+			if (!NetworkManager.Instance?.IsOnline == true)
+				return IsLocal; // Single player
+				
+			return IsNetworkOwner; // Local player is the network owner
+		}
+	}
 
 	public int CurrentHealth => _currentHealth;
 	public bool IsDead => _isDead;
@@ -100,9 +134,12 @@ public partial class PlayerController : CharacterBody3D
 			NetworkId = 1;
 		}
 		
-		if (IsLocal && IsNetworkOwner) 
+		// Camera and input setup for local player
+		if (IsLocalPlayer) 
 		{
 			Input.MouseMode = Input.MouseModeEnum.Captured;
+			_camera.Current = true;
+			GD.Print($"Local player camera activated for {PlayerName} (NetworkId: {NetworkId})");
 		}
 		else
 		{
@@ -121,13 +158,10 @@ public partial class PlayerController : CharacterBody3D
 			NetworkId = multiplayerId;
 		}
 		
-		// Only the owner of this player can control it
-		IsLocal = IsNetworkOwner;
-		
 		// Set multiplayer authority
 		SetMultiplayerAuthority(NetworkId);
 		
-		GD.Print($"Player setup: NetworkId={NetworkId}, IsLocal={IsLocal}, MultiplayerId={multiplayerId}");
+		GD.Print($"Player network setup: NetworkId={NetworkId}, MultiplayerId={multiplayerId}, IsServer={NetworkManager.Instance.IsServer}, IsLocalPlayer={IsLocalPlayer}");
 	}
 
 	private void InitializeStats()
@@ -151,7 +185,8 @@ public partial class PlayerController : CharacterBody3D
 
 	public override void _Input(InputEvent @event)
 	{
-		if (!IsLocal || _isDead) return;
+		// Only process input for local player
+		if (!IsLocalPlayer || _isDead) return;
 
 		if (@event is InputEventMouseMotion mm)
 		{
@@ -168,6 +203,7 @@ public partial class PlayerController : CharacterBody3D
 		_pitch -= mouseMotion.Relative.Y * MouseSensitivity;
 		_pitch = Mathf.Clamp(_pitch, -90f, 90f);
 
+		// Apply rotation immediately for responsive camera
 		RotationDegrees = new Vector3(0f, _yaw, 0f);
 		_camera.RotationDegrees = new Vector3(_pitch, 0f, 0f);
 	}
@@ -203,7 +239,7 @@ public partial class PlayerController : CharacterBody3D
 			}
 		}
 
-		// Next/Previous weapon keys
+		// Additional weapon switching hotkeys
 		if (@event.IsActionPressed("weapon_next"))
 		{
 			_weaponSystem.SwitchToNextWeapon();
@@ -221,17 +257,38 @@ public partial class PlayerController : CharacterBody3D
 		UpdateCooldowns(delta);
 		UpdateHealthRegeneration(delta);
 
-		if (IsLocal && IsNetworkOwner)
+		// All players process input for client-side prediction
+		if (IsLocalPlayer)
 		{
 			HandleInput(delta);
-			SyncNetworkState();
+			
+			// Send network updates periodically
+			if (NetworkManager.Instance?.IsOnline == true)
+			{
+				_lastSyncTime += delta;
+				if (_lastSyncTime >= SyncInterval || HasSignificantChange())
+				{
+					SyncNetworkState();
+					_lastSyncTime = 0.0;
+				}
+			}
 		}
 		else if (NetworkManager.Instance?.IsOnline == true)
 		{
+			// Remote players interpolate to network state
 			InterpolateNetworkState();
 		}
 
 		MoveAndSlide();
+	}
+
+	private bool HasSignificantChange()
+	{
+		const float positionThreshold = 0.1f;
+		const float rotationThreshold = 2.0f;
+		
+		return GlobalPosition.DistanceTo(_lastSentPosition) > positionThreshold ||
+			   GlobalRotationDegrees.DistanceTo(_lastSentRotation) > rotationThreshold;
 	}
 
 	private void UpdateCooldowns(double delta)
@@ -343,8 +400,12 @@ public partial class PlayerController : CharacterBody3D
 	{
 		if (_isDead) return;
 
-		ApplyGravity(delta);
-		HandleJump();
+		// Physics are processed locally for all players for responsiveness
+		if (IsLocalPlayer)
+		{
+			ApplyGravity(delta);
+			HandleJump();
+		}
 	}
 
 	private void ApplyGravity(double delta)
@@ -357,7 +418,7 @@ public partial class PlayerController : CharacterBody3D
 
 	private void HandleJump()
 	{
-		if (Input.IsActionJustPressed("jump") && IsLocal && IsOnFloor())
+		if (Input.IsActionJustPressed("jump") && IsOnFloor())
 		{
 			Velocity = new Vector3(Velocity.X, JumpForce, Velocity.Z);
 		}
@@ -375,7 +436,7 @@ public partial class PlayerController : CharacterBody3D
 
 	private void Shoot()
 	{
-		if (!IsNetworkOwner) return;
+		if (!IsLocalPlayer) return;
 		
 		if (_weaponSystem == null) return;
 
@@ -411,11 +472,12 @@ public partial class PlayerController : CharacterBody3D
 	{
 		if (_isDead) return;
 		
-		// Only server processes damage
+		_lastDamageTime = Time.GetUnixTimeFromSystem();
+		
+		// Server authorizes damage
 		if (NetworkManager.Instance?.IsServer == true || !NetworkManager.Instance?.IsOnline == true)
 		{
 			_currentHealth = Mathf.Max(0, _currentHealth - amount);
-			_lastDamageTime = Time.GetUnixTimeFromSystem();
 			
 			// Sync damage across network
 			if (NetworkManager.Instance?.IsOnline == true)
@@ -453,17 +515,13 @@ public partial class PlayerController : CharacterBody3D
 		GD.Print($"{PlayerName} has died!");
 		
 		// Sync death across network
-		if (NetworkManager.Instance?.IsOnline == true && IsNetworkOwner)
+		if (NetworkManager.Instance?.IsOnline == true && IsLocalPlayer)
 		{
 			Rpc(MethodName.OnPlayerDied, NetworkId);
 		}
 		
-		// Disable input and physics
+		// Disable physics but keep processing for network sync
 		SetPhysicsProcess(false);
-		if (IsNetworkOwner)
-		{
-			SetProcess(false);
-		}
 	}
 
 	public void Respawn()
@@ -482,7 +540,6 @@ public partial class PlayerController : CharacterBody3D
 		}
 		
 		SetPhysicsProcess(true);
-		SetProcess(true);
 		
 		GD.Print($"{PlayerName} respawned!");
 	}
@@ -499,22 +556,26 @@ public partial class PlayerController : CharacterBody3D
 	private void SyncNetworkState()
 	{
 		// Send player state to other clients
-		_networkPosition = GlobalPosition;
-		_networkRotation = GlobalRotationDegrees;
-		_networkVelocity = Velocity;
-		_networkHealth = _currentHealth;
-		_networkWeaponIndex = _weaponSystem?.CurrentWeaponIndex ?? 0;
+		_lastSentPosition = GlobalPosition;
+		_lastSentRotation = GlobalRotationDegrees;
 		
 		// Use unreliable RPC for frequent updates
-		Rpc(MethodName.UpdatePlayerState, _networkPosition, _networkRotation, _networkVelocity, _networkHealth, _networkWeaponIndex);
+		Rpc(MethodName.UpdatePlayerState, 
+			GlobalPosition, 
+			GlobalRotationDegrees, 
+			Velocity, 
+			_currentHealth, 
+			_weaponSystem?.CurrentWeaponIndex ?? 0);
 	}
 
 	private void InterpolateNetworkState()
 	{
 		// Smoothly interpolate to network state for non-local players
 		var lerpSpeed = 10.0f;
-		GlobalPosition = GlobalPosition.Lerp(_networkPosition, (float)(lerpSpeed * GetProcessDeltaTime()));
-		GlobalRotationDegrees = GlobalRotationDegrees.Lerp(_networkRotation, (float)(lerpSpeed * GetProcessDeltaTime()));
+		var deltaTime = (float)GetProcessDeltaTime();
+		
+		GlobalPosition = GlobalPosition.Lerp(_networkPosition, lerpSpeed * deltaTime);
+		GlobalRotationDegrees = GlobalRotationDegrees.Lerp(_networkRotation, lerpSpeed * deltaTime);
 		
 		// Update health if changed
 		if (_currentHealth != _networkHealth)
@@ -534,7 +595,7 @@ public partial class PlayerController : CharacterBody3D
 	[Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable)]
 	private void UpdatePlayerState(Vector3 position, Vector3 rotation, Vector3 velocity, int health, int weaponIndex)
 	{
-		if (IsNetworkOwner) return; // Don't update own state
+		if (IsLocalPlayer) return; // Don't update own state
 		
 		_networkPosition = position;
 		_networkRotation = rotation;
@@ -558,7 +619,7 @@ public partial class PlayerController : CharacterBody3D
 			// Create muzzle flash or other effects here
 		}
 		
-		// Only server spawns actual bullets
+		// Only server spawns actual bullets for hit detection
 		if (NetworkManager.Instance?.IsServer == true || !NetworkManager.Instance?.IsOnline == true)
 		{
 			var bullet = BulletScene?.Instantiate() as Bullet;
@@ -606,6 +667,13 @@ public partial class PlayerController : CharacterBody3D
 		}
 		
 		SetupNetworkPlayer();
+		
+		// Update camera and input for local player
+		if (IsLocalPlayer)
+		{
+			Input.MouseMode = Input.MouseModeEnum.Captured;
+			_camera.Current = true;
+		}
 	}
 
 	// Add method to get current player info for network sync
