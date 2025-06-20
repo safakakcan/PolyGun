@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3 uid="uid://cmegh4qfkepj"]
+
+[ext_resource type="Texture2D" uid="uid://d3mt8i87yyxu1" path="res://Textures/Crosshair-PNG-Picture.png" id="1_jx3gp"]
+
+[node name="Crosshair" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TextureRect" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -31.0
+offset_top = -31.0
+offset_right = 589.0
+offset_bottom = 589.0
+grow_horizontal = 2
+grow_vertical = 2
+scale = Vector2(0.1, 0.1)
+texture = ExtResource("1_jx3gp")
+stretch_mode = 3

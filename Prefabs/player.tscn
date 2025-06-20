@@ -1,0 +1,30 @@
+[gd_scene load_steps=6 format=3 uid="uid://bfanuxdslh8fd"]
+
+[ext_resource type="Script" uid="uid://cu0pjwni668bc" path="res://Scripts/PlayerController.cs" id="1_psw0r"]
+[ext_resource type="PackedScene" uid="uid://dnwt5jdixc0so" path="res://Prefabs/bullet.tscn" id="2_5wxv7"]
+[ext_resource type="AudioStream" uid="uid://clcq5siuyobto" path="res://Sounds/fire.wav" id="2_y5hcb"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_gf2k1"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_gjdyk"]
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("1_psw0r")
+FireSound = ExtResource("2_y5hcb")
+BulletScene = ExtResource("2_5wxv7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_gf2k1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("CapsuleMesh_gjdyk")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -0.25)
+
+[node name="AudioListener3D" type="AudioListener3D" parent="Camera3D"]
+
+[node name="GunPoint" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, -0.75)
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="GunPoint"]

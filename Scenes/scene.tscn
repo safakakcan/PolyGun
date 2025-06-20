@@ -1,0 +1,92 @@
+[gd_scene load_steps=14 format=3 uid="uid://c6m16dpjfbkr7"]
+
+[ext_resource type="PackedScene" uid="uid://bfanuxdslh8fd" path="res://Prefabs/player.tscn" id="1_gjdyk"]
+[ext_resource type="PackedScene" uid="uid://cmegh4qfkepj" path="res://Prefabs/crosshair.tscn" id="3_8t5iv"]
+[ext_resource type="Texture2D" uid="uid://dn01k6s2jitl5" path="res://Textures/seamless_ground_texture_by_hhh316_d312eb5-fullview.jpg" id="3_lrus4"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_p6gg1"]
+friction = 0.9
+bounce = 0.1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_8t5iv"]
+albedo_color = Color(0.76662, 0.76662, 0.76662, 1)
+albedo_texture = ExtResource("3_lrus4")
+metallic_specular = 0.0
+uv1_scale = Vector3(100, 100, 100)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_gjdyk"]
+material = SubResource("StandardMaterial3D_8t5iv")
+size = Vector2(500, 500)
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_lrus4"]
+
+[sub_resource type="PhysicalSkyMaterial" id="PhysicalSkyMaterial_p6gg1"]
+
+[sub_resource type="Sky" id="Sky_lrus4"]
+sky_material = SubResource("PhysicalSkyMaterial_p6gg1")
+
+[sub_resource type="Environment" id="Environment_p6gg1"]
+background_mode = 2
+sky = SubResource("Sky_lrus4")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 2
+ssil_enabled = true
+sdfgi_enabled = true
+volumetric_fog_albedo = Color(0.624321, 0.683694, 0.739549, 1)
+volumetric_fog_emission = Color(0.176471, 0.278431, 0.352941, 1)
+volumetric_fog_ambient_inject = 0.1
+adjustment_enabled = true
+adjustment_brightness = 1.2
+adjustment_contrast = 1.2
+adjustment_saturation = 1.25
+
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_p6gg1"]
+
+[sub_resource type="Compositor" id="Compositor_lrus4"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_lrus4"]
+size = Vector3(1, 2, 8)
+
+[node name="Scene" type="Node3D"]
+
+[node name="Player" parent="." instance=ExtResource("1_gjdyk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+
+[node name="Floor" type="StaticBody3D" parent="."]
+physics_material_override = SubResource("PhysicsMaterial_p6gg1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("PlaneMesh_gjdyk")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("WorldBoundaryShape3D_lrus4")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.399853, 0.916579, 0, -0.916579, 0.399853, 0, 11.3147, 0)
+light_energy = 0.75
+light_indirect_energy = 1.5
+light_volumetric_fog_energy = 0.0
+light_specular = 0.5
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_p6gg1")
+camera_attributes = SubResource("CameraAttributesPhysical_p6gg1")
+compositor = SubResource("Compositor_lrus4")
+
+[node name="CSGMesh3D" type="CSGMesh3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 1, 0)
+use_collision = true
+mesh = SubResource("BoxMesh_lrus4")
+
+[node name="CSGMesh3D2" type="CSGMesh3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.9834, 1, -0.996078)
+use_collision = true
+mesh = SubResource("BoxMesh_lrus4")
+
+[node name="CSGMesh3D3" type="CSGMesh3D" parent="."]
+transform = Transform3D(-4.37114e-08, 0, 1, 0, 1, 0, -1, 0, -4.37114e-08, -1.48308, 1, -4.50109)
+use_collision = true
+mesh = SubResource("BoxMesh_lrus4")
+
+[node name="Crosshair" parent="." instance=ExtResource("3_8t5iv")]
