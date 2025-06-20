@@ -249,6 +249,7 @@ public partial class NetworkManager : Node
 		if (_udpListener == null) return;
 
 		// Check for server broadcasts
+		bool foundNewServer = false;
 		while (_udpListener.GetAvailablePacketCount() > 0)
 		{
 			var packet = _udpListener.GetPacket();
@@ -285,15 +286,19 @@ public partial class NetworkManager : Node
 					{
 						_discoveredServers.Add(server);
 						GD.Print($"Discovered server: {server.ServerName} at {server.IPAddress}:{server.Port}");
+						foundNewServer = true;
 					}
-
-					EmitSignal(SignalName.ServerListUpdated);
 				}
 			}
 			catch (Exception e)
 			{
 				GD.PrintErr($"Failed to parse server broadcast: {e.Message}");
 			}
+		}
+		
+		if (foundNewServer)
+		{
+			EmitSignal(SignalName.ServerListUpdated);
 		}
 	}
 
@@ -341,21 +346,9 @@ public partial class NetworkManager : Node
 		
 		try
 		{
-			// Try broadcast to 255.255.255.255
-			_udpBroadcaster.ConnectToHost("255.255.255.255", DefaultPort + 1);
-			var result = _udpBroadcaster.PutPacket(packet);
-			_udpBroadcaster.Close();
+			bool broadcastSuccessful = false;
 			
-			if (result == Error.Ok)
-			{
-				GD.Print($"Broadcasted server to 255.255.255.255: {_currentServerInfo.ServerName}");
-			}
-			else
-			{
-				GD.PrintErr($"Failed to broadcast to 255.255.255.255: {result}");
-			}
-			
-			// Also try local subnet broadcast
+			// Try local subnet broadcast first (more likely to work)
 			var localIP = GetLocalIPAddress();
 			if (localIP != "127.0.0.1")
 			{
@@ -363,13 +356,57 @@ public partial class NetworkManager : Node
 				if (subnetBroadcast != localIP)
 				{
 					_udpBroadcaster.ConnectToHost(subnetBroadcast, DefaultPort + 1);
-					result = _udpBroadcaster.PutPacket(packet);
+					var result = _udpBroadcaster.PutPacket(packet);
 					_udpBroadcaster.Close();
 					
 					if (result == Error.Ok)
 					{
 						GD.Print($"Broadcasted server to {subnetBroadcast}: {_currentServerInfo.ServerName}");
+						broadcastSuccessful = true;
 					}
+					else
+					{
+						GD.PrintErr($"Failed to broadcast to {subnetBroadcast}: {result}");
+					}
+				}
+			}
+			
+			// Try multicast address (more reliable than broadcast)
+			_udpBroadcaster.ConnectToHost("224.0.0.1", DefaultPort + 1);
+			var multicastResult = _udpBroadcaster.PutPacket(packet);
+			_udpBroadcaster.Close();
+			
+			if (multicastResult == Error.Ok)
+			{
+				GD.Print($"Multicasted server to 224.0.0.1: {_currentServerInfo.ServerName}");
+				broadcastSuccessful = true;
+			}
+			
+			// Try direct localhost for same-machine testing
+			_udpBroadcaster.ConnectToHost("127.0.0.1", DefaultPort + 1);
+			var localhostResult = _udpBroadcaster.PutPacket(packet);
+			_udpBroadcaster.Close();
+			
+			if (localhostResult == Error.Ok)
+			{
+				GD.Print($"Sent server info to localhost: {_currentServerInfo.ServerName}");
+				broadcastSuccessful = true;
+			}
+			
+			// Only try global broadcast if others failed and it might work
+			if (!broadcastSuccessful)
+			{
+				_udpBroadcaster.ConnectToHost("255.255.255.255", DefaultPort + 1);
+				var globalResult = _udpBroadcaster.PutPacket(packet);
+				_udpBroadcaster.Close();
+				
+				if (globalResult == Error.Ok)
+				{
+					GD.Print($"Broadcasted server to 255.255.255.255: {_currentServerInfo.ServerName}");
+				}
+				else
+				{
+					GD.Print($"Note: Global broadcast blocked (normal on macOS). Using local discovery methods.");
 				}
 			}
 		}

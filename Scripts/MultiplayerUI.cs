@@ -23,6 +23,9 @@ public partial class MultiplayerUI : Control
 	private ItemList _serverList;
 	private Button _refreshButton;
 	private Button _joinSelectedButton;
+	private Button _directConnectButton;
+	private LineEdit _ipAddressEdit;
+	private SpinBox _connectPortSpinBox;
 	private Button _backToBrowserButton;
 	private Label _refreshStatus;
 
@@ -184,6 +187,38 @@ public partial class MultiplayerUI : Control
 		_backToBrowserButton.Text = "Back";
 		_backToBrowserButton.Pressed += ShowMainMenu;
 		buttonContainer.AddChild(_backToBrowserButton);
+
+		// Separator
+		container.AddChild(new HSeparator());
+
+		// Direct connect section
+		var directLabel = new Label();
+		directLabel.Text = "Direct Connect";
+		directLabel.HorizontalAlignment = HorizontalAlignment.Center;
+		directLabel.AddThemeFontSizeOverride("font_size", 16);
+		container.AddChild(directLabel);
+
+		var directContainer = new HBoxContainer();
+		directContainer.Alignment = BoxContainer.AlignmentMode.Center;
+		container.AddChild(directContainer);
+
+		directContainer.AddChild(new Label { Text = "IP:" });
+		_ipAddressEdit = new LineEdit();
+		_ipAddressEdit.PlaceholderText = "127.0.0.1";
+		_ipAddressEdit.CustomMinimumSize = new Vector2(150, 0);
+		directContainer.AddChild(_ipAddressEdit);
+
+		directContainer.AddChild(new Label { Text = "Port:" });
+		_connectPortSpinBox = new SpinBox();
+		_connectPortSpinBox.MinValue = 1000;
+		_connectPortSpinBox.MaxValue = 65535;
+		_connectPortSpinBox.Value = 7000;
+		directContainer.AddChild(_connectPortSpinBox);
+
+		_directConnectButton = new Button();
+		_directConnectButton.Text = "Connect";
+		_directConnectButton.Pressed += OnDirectConnectPressed;
+		directContainer.AddChild(_directConnectButton);
 	}
 
 	private void SetupCreateServerMenu(Control parent)
@@ -472,6 +507,21 @@ public partial class MultiplayerUI : Control
 		}
 	}
 
+	private void OnDirectConnectPressed()
+	{
+		var ipAddress = _ipAddressEdit.Text.Trim();
+		var port = (int)_connectPortSpinBox.Value;
+
+		if (string.IsNullOrEmpty(ipAddress))
+		{
+			ipAddress = "127.0.0.1";
+		}
+
+		GD.Print($"Attempting direct connection to {ipAddress}:{port}");
+		ShowConnecting($"Connecting to {ipAddress}:{port}...");
+		NetworkManager.Instance?.JoinServer(ipAddress, port);
+	}
+
 	private void OnCreateServerPressed()
 	{
 		var serverName = _serverNameEdit.Text;
@@ -524,6 +574,12 @@ public partial class MultiplayerUI : Control
 	private void OnServerCreated()
 	{
 		GD.Print("Server created successfully");
+		var serverInfo = NetworkManager.Instance?.CurrentServerInfo;
+		if (serverInfo != null)
+		{
+			GD.Print($"Server IP: {serverInfo.IPAddress}:{serverInfo.Port}");
+			GD.Print($"Other players can connect directly using: {serverInfo.IPAddress}:{serverInfo.Port}");
+		}
 		ShowLobby();
 	}
 
