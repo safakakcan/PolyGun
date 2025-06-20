@@ -1,8 +1,10 @@
-[gd_scene load_steps=14 format=3 uid="uid://c6m16dpjfbkr7"]
+[gd_scene load_steps=16 format=3 uid="uid://c6m16dpjfbkr7"]
 
 [ext_resource type="PackedScene" uid="uid://bfanuxdslh8fd" path="res://Prefabs/player.tscn" id="1_gjdyk"]
 [ext_resource type="PackedScene" uid="uid://cmegh4qfkepj" path="res://Prefabs/crosshair.tscn" id="3_8t5iv"]
 [ext_resource type="Texture2D" uid="uid://dn01k6s2jitl5" path="res://Textures/seamless_ground_texture_by_hhh316_d312eb5-fullview.jpg" id="3_lrus4"]
+[ext_resource type="Script" uid="uid://b1rpedmv1ehbi" path="res://Scripts/GameManager.cs" id="4_gmmgr"]
+[ext_resource type="Script" uid="uid://bn4d4h2d1irlr" path="res://Scripts/UIManager.cs" id="5_uimgr"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_p6gg1"]
 friction = 0.9
@@ -90,3 +92,15 @@ use_collision = true
 mesh = SubResource("BoxMesh_lrus4")
 
 [node name="Crosshair" parent="." instance=ExtResource("3_8t5iv")]
+
+[node name="GameManager" type="Node" parent="."]
+script = ExtResource("4_gmmgr")
+
+[node name="UIManager" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_uimgr")
