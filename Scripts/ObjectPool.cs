@@ -482,4 +482,114 @@ public partial class AudioPool : Node
 			Instance = null;
 		}
 	}
+}
+
+public partial class AdvancedAudioManager : Node
+{
+	public static AdvancedAudioManager Instance { get; private set; }
+	
+	[Export] public AudioStream[] BackgroundMusic;
+	[Export] public AudioStream[] CombatMusic;
+	[Export] public float MusicFadeTime = 2.0f;
+	
+	private AudioStreamPlayer _musicPlayer;
+	private AudioStreamPlayer _musicPlayerFade;
+	private bool _inCombat = false;
+	
+	// Audio categories for better organization
+	private Dictionary<string, AudioStreamPlayer> _audioChannels = new Dictionary<string, AudioStreamPlayer>();
+	
+	public override void _Ready()
+	{
+		if (Instance == null)
+		{
+			Instance = this;
+			ProcessMode = ProcessModeEnum.Always;
+			InitializeAudioChannels();
+		}
+		else
+		{
+			QueueFree();
+		}
+	}
+	
+	private void InitializeAudioChannels()
+	{
+		// Create different audio channels
+		CreateAudioChannel("Music", -10f);
+		CreateAudioChannel("SFX", 0f);
+		CreateAudioChannel("UI", -5f);
+		CreateAudioChannel("Ambient", -15f);
+		
+		_musicPlayer = _audioChannels["Music"];
+		
+		// Create fade player
+		_musicPlayerFade = new AudioStreamPlayer();
+		_musicPlayerFade.VolumeDb = -10f;
+		AddChild(_musicPlayerFade);
+		
+		// Tween will be created when needed using CreateTween()
+	}
+	
+	private void CreateAudioChannel(string name, float volumeDb)
+	{
+		var player = new AudioStreamPlayer();
+		player.VolumeDb = volumeDb;
+		player.Name = name;
+		AddChild(player);
+		_audioChannels[name] = player;
+	}
+	
+	public void PlaySFX(AudioStream audioStream, float pitch = 1.0f, float volume = 0.0f)
+	{
+		AudioPool.Instance?.PlayOneShot3D(audioStream, Vector3.Zero, pitch, volume);
+	}
+	
+	public void PlayUI(AudioStream audioStream, float pitch = 1.0f)
+	{
+		var player = _audioChannels["UI"];
+		player.Stream = audioStream;
+		player.PitchScale = pitch;
+		player.Play();
+	}
+	
+	public void SetCombatMode(bool inCombat)
+	{
+		if (_inCombat == inCombat) return;
+		
+		_inCombat = inCombat;
+		var targetMusic = inCombat ? CombatMusic : BackgroundMusic;
+		
+		if (targetMusic.Length > 0)
+		{
+			var randomTrack = targetMusic[GD.RandRange(0, targetMusic.Length - 1)];
+			CrossfadeMusic(randomTrack);
+		}
+	}
+	
+	private void CrossfadeMusic(AudioStream newTrack)
+	{
+		if (_musicPlayer.Stream == newTrack) return;
+		
+		_musicPlayerFade.Stream = newTrack;
+		_musicPlayerFade.VolumeDb = -80f;
+		_musicPlayerFade.Play();
+		
+		// Fade out current, fade in new
+		var tween = CreateTween();
+		tween.TweenMethod(Callable.From<float>(UpdateMusicCrossfade), 0.0f, 1.0f, MusicFadeTime);
+		tween.TweenCallback(Callable.From(CompleteMusicCrossfade)).SetDelay(MusicFadeTime);
+	}
+	
+	private void UpdateMusicCrossfade(float progress)
+	{
+		_musicPlayer.VolumeDb = Mathf.Lerp(-10f, -80f, progress);
+		_musicPlayerFade.VolumeDb = Mathf.Lerp(-80f, -10f, progress);
+	}
+	
+	private void CompleteMusicCrossfade()
+	{
+		(_musicPlayer, _musicPlayerFade) = (_musicPlayerFade, _musicPlayer);
+		_musicPlayerFade.Stop();
+	}
 } 

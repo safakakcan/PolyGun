@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 public abstract partial class Weapon : Node3D
 {
@@ -363,5 +364,103 @@ public partial class WeaponSystem : Node3D
 	private void OnWeaponReloadCompleted()
 	{
 		GD.Print($"{_currentWeapon.WeaponName} reload complete!");
+	}
+}
+
+[System.Serializable]
+public class WeaponAttachment
+{
+	public string Name;
+	public WeaponAttachmentType Type;
+	public float DamageModifier = 1.0f;
+	public float AccuracyModifier = 1.0f;
+	public float FireRateModifier = 1.0f;
+	public float ReloadSpeedModifier = 1.0f;
+}
+
+public enum WeaponAttachmentType
+{
+	Scope,
+	Barrel,
+	Grip,
+	Magazine
+}
+
+public partial class AdvancedWeapon : Weapon
+{
+	// Note: Cannot export custom arrays in Godot, use code initialization instead
+	public WeaponAttachment[] AvailableAttachments;
+	private List<WeaponAttachment> _equippedAttachments = new List<WeaponAttachment>();
+	
+	[Export] public int BaseExperience = 0;
+	[Export] public int CurrentExperience = 0;
+	[Export] public int ExperienceToNextLevel = 100;
+	[Export] public int WeaponLevel = 1;
+	
+	public float EffectiveDamage => Damage * GetAttachmentModifier(WeaponAttachmentType.Barrel);
+	public float EffectiveAccuracy => (1.0f / Spread) * GetAttachmentModifier(WeaponAttachmentType.Scope);
+	public float EffectiveFireRate => FireRate / GetAttachmentModifier(WeaponAttachmentType.Grip);
+	
+	public void EquipAttachment(WeaponAttachment attachment)
+	{
+		// Remove existing attachment of same type
+		_equippedAttachments.RemoveAll(a => a.Type == attachment.Type);
+		_equippedAttachments.Add(attachment);
+		UpdateWeaponStats();
+	}
+	
+	public void AddExperience(int amount)
+	{
+		CurrentExperience += amount;
+		CheckLevelUp();
+	}
+	
+	private void CheckLevelUp()
+	{
+		while (CurrentExperience >= ExperienceToNextLevel)
+		{
+			WeaponLevel++;
+			CurrentExperience -= ExperienceToNextLevel;
+			ExperienceToNextLevel = Mathf.RoundToInt(ExperienceToNextLevel * 1.2f);
+			GD.Print($"{WeaponName} leveled up to {WeaponLevel}!");
+		}
+	}
+	
+	private float GetAttachmentModifier(WeaponAttachmentType type)
+	{
+		var attachment = _equippedAttachments.FirstOrDefault(a => a.Type == type);
+		return type switch
+		{
+			WeaponAttachmentType.Scope => attachment?.AccuracyModifier ?? 1.0f,
+			WeaponAttachmentType.Barrel => attachment?.DamageModifier ?? 1.0f,
+			WeaponAttachmentType.Grip => attachment?.FireRateModifier ?? 1.0f,
+			WeaponAttachmentType.Magazine => attachment?.ReloadSpeedModifier ?? 1.0f,
+			_ => 1.0f
+		};
+	}
+	
+	private void UpdateWeaponStats()
+	{
+		// Update weapon properties based on attachments
+		// This would trigger UI updates and visual changes
+	}
+	
+	protected override void Fire(Vector3 firePoint, Vector3 direction, PlayerController shooter)
+	{
+		// Default implementation for advanced weapon
+		CreateBullet(firePoint, ApplySpread(direction), shooter);
+		PlaySound(FireSound, GD.Randf() * 0.1f + 0.95f);
+	}
+	
+	private void CreateBullet(Vector3 position, Vector3 direction, PlayerController shooter)
+	{
+		if (BulletScene == null) return;
+		
+		var bullet = (Bullet)BulletScene.Instantiate();
+		bullet.GlobalPosition = position;
+		bullet.Initialize(direction, shooter);
+		bullet.Damage = (int)EffectiveDamage; // Use effective damage with attachments
+		
+		GetTree().Root.AddChild(bullet);
 	}
 } 

@@ -49,6 +49,20 @@ public partial class PlayerController : CharacterBody3D
 	[Export] public AudioStream ReloadSound;
 	[Export] public AudioStream EmptyClipSound;
 
+	// Add these properties after the existing exports
+	[Export] public int NetworkId = 0;
+	
+	// Add network sync variables
+	private Vector3 _networkPosition;
+	private Vector3 _networkRotation;
+	private Vector3 _networkVelocity;
+	private bool _networkShooting;
+	private int _networkWeaponIndex;
+	private int _networkHealth;
+
+	// Network authority check
+	public bool IsNetworkOwner => Multiplayer.GetUniqueId() == NetworkId || (NetworkId == 0 && IsLocal);
+
 	public int CurrentHealth => _currentHealth;
 	public bool IsDead => _isDead;
 	public WeaponSystem WeaponSystem => _weaponSystem;
@@ -74,7 +88,19 @@ public partial class PlayerController : CharacterBody3D
 			AddChild(_weaponSystem);
 		}
 		
-		if (IsLocal) 
+		// Network setup
+		if (NetworkManager.Instance != null && NetworkManager.Instance.IsOnline)
+		{
+			SetupNetworkPlayer();
+		}
+		else
+		{
+			// Single player setup
+			IsLocal = true;
+			NetworkId = 1;
+		}
+		
+		if (IsLocal && IsNetworkOwner) 
 		{
 			Input.MouseMode = Input.MouseModeEnum.Captured;
 		}
@@ -82,6 +108,26 @@ public partial class PlayerController : CharacterBody3D
 		{
 			_camera.Current = false;
 		}
+	}
+
+	private void SetupNetworkPlayer()
+	{
+		// Set network ID based on multiplayer peer ID
+		var multiplayerId = Multiplayer.GetUniqueId();
+		
+		if (NetworkManager.Instance.IsServer && NetworkId == 0)
+		{
+			// Server assigns network IDs
+			NetworkId = multiplayerId;
+		}
+		
+		// Only the owner of this player can control it
+		IsLocal = IsNetworkOwner;
+		
+		// Set multiplayer authority
+		SetMultiplayerAuthority(NetworkId);
+		
+		GD.Print($"Player setup: NetworkId={NetworkId}, IsLocal={IsLocal}, MultiplayerId={multiplayerId}");
 	}
 
 	private void InitializeStats()
@@ -175,9 +221,14 @@ public partial class PlayerController : CharacterBody3D
 		UpdateCooldowns(delta);
 		UpdateHealthRegeneration(delta);
 
-		if (IsLocal)
+		if (IsLocal && IsNetworkOwner)
 		{
 			HandleInput(delta);
+			SyncNetworkState();
+		}
+		else if (NetworkManager.Instance?.IsOnline == true)
+		{
+			InterpolateNetworkState();
 		}
 
 		MoveAndSlide();
@@ -324,12 +375,19 @@ public partial class PlayerController : CharacterBody3D
 
 	private void Shoot()
 	{
+		if (!IsNetworkOwner) return;
+		
 		if (_weaponSystem == null) return;
 
 		Vector3 fireDirection = CalculateBulletDirection();
 		bool fired = _weaponSystem.TryFire(_gunPoint.GlobalPosition, fireDirection);
 		
-		if (!fired && _weaponSystem.CurrentWeapon?.CurrentAmmo <= 0)
+		if (fired)
+		{
+			// Sync shooting across network
+			Rpc(MethodName.OnPlayerShoot, _gunPoint.GlobalPosition, fireDirection);
+		}
+		else if (_weaponSystem.CurrentWeapon?.CurrentAmmo <= 0)
 		{
 			// Play empty sound using audio pool
 			if (EmptyClipSound != null)
@@ -349,19 +407,32 @@ public partial class PlayerController : CharacterBody3D
 		_weaponSystem?.Reload();
 	}
 
-	public void TakeDamage(int amount)
+	public void TakeDamage(int amount, int attackerId = 0)
 	{
 		if (_isDead) return;
 		
-		_currentHealth = Mathf.Max(0, _currentHealth - amount);
-		_lastDamageTime = Time.GetUnixTimeFromSystem();
-		
-		EmitSignal(SignalName.HealthChanged, _currentHealth);
-		GD.Print($"{PlayerName} took {amount} damage! Health: {_currentHealth}");
-		
-		if (_currentHealth <= 0)
+		// Only server processes damage
+		if (NetworkManager.Instance?.IsServer == true || !NetworkManager.Instance?.IsOnline == true)
 		{
-			Die();
+			_currentHealth = Mathf.Max(0, _currentHealth - amount);
+			_lastDamageTime = Time.GetUnixTimeFromSystem();
+			
+			// Sync damage across network
+			if (NetworkManager.Instance?.IsOnline == true)
+			{
+				Rpc(MethodName.OnPlayerDamaged, _currentHealth, amount, attackerId);
+			}
+			else
+			{
+				EmitSignal(SignalName.HealthChanged, _currentHealth);
+			}
+			
+			GD.Print($"{PlayerName} took {amount} damage! Health: {_currentHealth}");
+			
+			if (_currentHealth <= 0)
+			{
+				Die();
+			}
 		}
 	}
 
@@ -381,9 +452,18 @@ public partial class PlayerController : CharacterBody3D
 		EmitSignal(SignalName.PlayerDied);
 		GD.Print($"{PlayerName} has died!");
 		
+		// Sync death across network
+		if (NetworkManager.Instance?.IsOnline == true && IsNetworkOwner)
+		{
+			Rpc(MethodName.OnPlayerDied, NetworkId);
+		}
+		
 		// Disable input and physics
 		SetPhysicsProcess(false);
-		SetProcess(false);
+		if (IsNetworkOwner)
+		{
+			SetProcess(false);
+		}
 	}
 
 	public void Respawn()
@@ -414,5 +494,132 @@ public partial class PlayerController : CharacterBody3D
 		
 		// Use audio pool for better performance
 		AudioPool.Instance?.PlayOneShot3D(sound, _gunPoint.GlobalPosition, pitch, 0f);
+	}
+
+	private void SyncNetworkState()
+	{
+		// Send player state to other clients
+		_networkPosition = GlobalPosition;
+		_networkRotation = GlobalRotationDegrees;
+		_networkVelocity = Velocity;
+		_networkHealth = _currentHealth;
+		_networkWeaponIndex = _weaponSystem?.CurrentWeaponIndex ?? 0;
+		
+		// Use unreliable RPC for frequent updates
+		Rpc(MethodName.UpdatePlayerState, _networkPosition, _networkRotation, _networkVelocity, _networkHealth, _networkWeaponIndex);
+	}
+
+	private void InterpolateNetworkState()
+	{
+		// Smoothly interpolate to network state for non-local players
+		var lerpSpeed = 10.0f;
+		GlobalPosition = GlobalPosition.Lerp(_networkPosition, (float)(lerpSpeed * GetProcessDeltaTime()));
+		GlobalRotationDegrees = GlobalRotationDegrees.Lerp(_networkRotation, (float)(lerpSpeed * GetProcessDeltaTime()));
+		
+		// Update health if changed
+		if (_currentHealth != _networkHealth)
+		{
+			_currentHealth = _networkHealth;
+			EmitSignal(SignalName.HealthChanged, _currentHealth);
+		}
+		
+		// Update weapon if changed
+		if (_weaponSystem?.CurrentWeaponIndex != _networkWeaponIndex)
+		{
+			_weaponSystem?.SwitchToWeapon(_networkWeaponIndex);
+		}
+	}
+
+	// Add network RPC methods:
+	[Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable)]
+	private void UpdatePlayerState(Vector3 position, Vector3 rotation, Vector3 velocity, int health, int weaponIndex)
+	{
+		if (IsNetworkOwner) return; // Don't update own state
+		
+		_networkPosition = position;
+		_networkRotation = rotation;
+		_networkVelocity = velocity;
+		_networkHealth = health;
+		_networkWeaponIndex = weaponIndex;
+	}
+
+	[Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = true, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+	private void OnPlayerShoot(Vector3 firePosition, Vector3 fireDirection)
+	{
+		// Create visual/audio effects for shooting
+		if (_weaponSystem?.CurrentWeapon != null)
+		{
+			// Play fire sound
+			if (_weaponSystem.CurrentWeapon.FireSound != null)
+			{
+				AudioPool.Instance?.PlayOneShot3D(_weaponSystem.CurrentWeapon.FireSound, firePosition, 1.0f, 0f);
+			}
+			
+			// Create muzzle flash or other effects here
+		}
+		
+		// Only server spawns actual bullets
+		if (NetworkManager.Instance?.IsServer == true || !NetworkManager.Instance?.IsOnline == true)
+		{
+			var bullet = BulletScene?.Instantiate() as Bullet;
+			if (bullet != null)
+			{
+				bullet.GlobalPosition = firePosition;
+				bullet.Initialize(fireDirection, this);
+				GetTree().Root.AddChild(bullet);
+			}
+		}
+	}
+
+	[Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = true, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+	private void OnPlayerDamaged(int newHealth, int damageAmount, int attackerId)
+	{
+		_currentHealth = newHealth;
+		EmitSignal(SignalName.HealthChanged, _currentHealth);
+		
+		// Show damage effects
+		GD.Print($"{PlayerName} took {damageAmount} damage from player {attackerId}! Health: {_currentHealth}");
+	}
+
+	[Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = true, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+	private void OnPlayerDied(int killerId)
+	{
+		if (!_isDead)
+		{
+			Die();
+			GD.Print($"{PlayerName} was killed by player {killerId}");
+		}
+	}
+
+	// Add method to set player info from network
+	public void SetPlayerInfo(PlayerInfo playerInfo)
+	{
+		NetworkId = playerInfo.PlayerId;
+		PlayerName = playerInfo.PlayerName;
+		_currentHealth = playerInfo.Health;
+		GlobalPosition = playerInfo.Position;
+		GlobalRotationDegrees = playerInfo.Rotation;
+		
+		if (_weaponSystem != null && playerInfo.CurrentWeaponIndex >= 0)
+		{
+			_weaponSystem.SwitchToWeapon(playerInfo.CurrentWeaponIndex);
+		}
+		
+		SetupNetworkPlayer();
+	}
+
+	// Add method to get current player info for network sync
+	public PlayerInfo GetPlayerInfo()
+	{
+		return new PlayerInfo
+		{
+			PlayerId = NetworkId,
+			PlayerName = PlayerName,
+			IsReady = !_isDead,
+			Position = GlobalPosition,
+			Rotation = GlobalRotationDegrees,
+			Health = _currentHealth,
+			CurrentWeaponIndex = _weaponSystem?.CurrentWeaponIndex ?? 0
+		};
 	}
 }
