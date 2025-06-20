@@ -55,8 +55,8 @@ public partial class NetworkManager : Node
 
 	private NetworkState _currentState = NetworkState.Offline;
 	private MultiplayerApi _multiplayer;
-	private UdpServer _udpServer;
-	private UdpServer _udpDiscovery;
+	private PacketPeerUdp _udpBroadcaster; // For server to broadcast its presence
+	private PacketPeerUdp _udpListener; // For client to listen for broadcasts
 	private Timer _broadcastTimer;
 	private Timer _discoveryTimer;
 	
@@ -216,91 +216,97 @@ public partial class NetworkManager : Node
 
 	public void StartServerDiscovery()
 	{
-		if (_udpDiscovery != null)
+		if (_udpListener != null)
 		{
-			_udpDiscovery.Stop();
+			_udpListener.Close();
 		}
 
-		_udpDiscovery = new UdpServer();
-		_udpDiscovery.Listen((ushort)(DefaultPort + 1)); // Use port + 1 for discovery
+		_udpListener = new PacketPeerUdp();
+		var result = _udpListener.Bind(DefaultPort + 1);
+		if (result != Error.Ok)
+		{
+			GD.PrintErr($"Failed to bind UDP listener: {result}");
+			return;
+		}
 		
 		_discoveredServers.Clear();
 		_discoveryTimer.Start();
 		
-		GD.Print("Started server discovery");
+		GD.Print($"Started server discovery on port {DefaultPort + 1}");
 	}
 
 	public void StopServerDiscovery()
 	{
 		_discoveryTimer.Stop();
-		_udpDiscovery?.Stop();
-		_udpDiscovery = null;
+		_udpListener?.Close();
+		_udpListener = null;
 		
 		GD.Print("Stopped server discovery");
 	}
 
 	private void DiscoverServers()
 	{
-		if (_udpDiscovery == null) return;
+		if (_udpListener == null) return;
 
-		_udpDiscovery.Poll();
-
-		if (_udpDiscovery.IsConnectionAvailable())
+		// Check for server broadcasts
+		while (_udpListener.GetAvailablePacketCount() > 0)
 		{
-			var peer = _udpDiscovery.TakeConnection();
-			var packet = peer.GetPacket();
+			var packet = _udpListener.GetPacket();
 			var message = packet.GetStringFromUtf8();
+			var serverIP = _udpListener.GetPacketIP();
 
 			try
 			{
 				var serverInfo = Json.ParseString(message).AsGodotDictionary();
-				var server = new ServerInfo
+				
+				// Check if this is a server broadcast
+				if (serverInfo.ContainsKey("server_name"))
 				{
-					ServerName = serverInfo["server_name"].AsString(),
-					HostName = serverInfo["host_name"].AsString(),
-					PlayerCount = serverInfo["player_count"].AsInt32(),
-					MaxPlayers = serverInfo["max_players"].AsInt32(),
-					MapName = serverInfo["map_name"].AsString(),
-					HasPassword = serverInfo["has_password"].AsBool(),
-					IPAddress = "127.0.0.1", // TODO: Get actual host IP
-					Port = serverInfo["port"].AsInt32()
-				};
+					var server = new ServerInfo
+					{
+						ServerName = serverInfo["server_name"].AsString(),
+						HostName = serverInfo["host_name"].AsString(),
+						PlayerCount = serverInfo["player_count"].AsInt32(),
+						MaxPlayers = serverInfo["max_players"].AsInt32(),
+						MapName = serverInfo["map_name"].AsString(),
+						HasPassword = serverInfo["has_password"].AsBool(),
+						IPAddress = serverIP,
+						Port = serverInfo["port"].AsInt32()
+					};
 
-				// Update or add server
-				var existing = _discoveredServers.FirstOrDefault(s => s.IPAddress == server.IPAddress && s.Port == server.Port);
-				if (existing != null)
-				{
-					var index = _discoveredServers.IndexOf(existing);
-					_discoveredServers[index] = server;
-				}
-				else
-				{
-					_discoveredServers.Add(server);
-				}
+					// Update or add server
+					var existing = _discoveredServers.FirstOrDefault(s => s.IPAddress == server.IPAddress && s.Port == server.Port);
+					if (existing != null)
+					{
+						var index = _discoveredServers.IndexOf(existing);
+						_discoveredServers[index] = server;
+					}
+					else
+					{
+						_discoveredServers.Add(server);
+						GD.Print($"Discovered server: {server.ServerName} at {server.IPAddress}:{server.Port}");
+					}
 
-				EmitSignal(SignalName.ServerListUpdated);
+					EmitSignal(SignalName.ServerListUpdated);
+				}
 			}
 			catch (Exception e)
 			{
-				GD.PrintErr($"Failed to parse server discovery packet: {e.Message}");
+				GD.PrintErr($"Failed to parse server broadcast: {e.Message}");
 			}
 		}
-
-		// Remove old servers (simplified since we don't have LastSeen tracking yet)
-		// This could be enhanced with proper timestamp tracking
 	}
 
 	private void StartServerBroadcast()
 	{
 		if (_currentState != NetworkState.Server) return;
 
-		if (_udpServer != null)
+		if (_udpBroadcaster != null)
 		{
-			_udpServer.Stop();
+			_udpBroadcaster.Close();
 		}
 
-		_udpServer = new UdpServer();
-		_udpServer.Listen((ushort)(DefaultPort + 1));
+		_udpBroadcaster = new PacketPeerUdp();
 		_broadcastTimer.Start();
 
 		GD.Print("Started server broadcast");
@@ -309,15 +315,15 @@ public partial class NetworkManager : Node
 	private void StopServerBroadcast()
 	{
 		_broadcastTimer.Stop();
-		_udpServer?.Stop();
-		_udpServer = null;
+		_udpBroadcaster?.Close();
+		_udpBroadcaster = null;
 
 		GD.Print("Stopped server broadcast");
 	}
 
 	private void BroadcastServer()
 	{
-		if (_currentState != NetworkState.Server || _udpServer == null) return;
+		if (_currentState != NetworkState.Server || _udpBroadcaster == null) return;
 
 		var serverData = new Godot.Collections.Dictionary
 		{
@@ -332,13 +338,44 @@ public partial class NetworkManager : Node
 
 		var json = Json.Stringify(serverData);
 		var packet = json.ToUtf8Buffer();
-
-		// Broadcast to local network
-		_udpServer.Poll();
-		if (_udpServer.IsConnectionAvailable())
+		
+		try
 		{
-			var peer = _udpServer.TakeConnection();
-			peer.PutPacket(packet);
+			// Try broadcast to 255.255.255.255
+			_udpBroadcaster.ConnectToHost("255.255.255.255", DefaultPort + 1);
+			var result = _udpBroadcaster.PutPacket(packet);
+			_udpBroadcaster.Close();
+			
+			if (result == Error.Ok)
+			{
+				GD.Print($"Broadcasted server to 255.255.255.255: {_currentServerInfo.ServerName}");
+			}
+			else
+			{
+				GD.PrintErr($"Failed to broadcast to 255.255.255.255: {result}");
+			}
+			
+			// Also try local subnet broadcast
+			var localIP = GetLocalIPAddress();
+			if (localIP != "127.0.0.1")
+			{
+				var subnetBroadcast = GetSubnetBroadcast(localIP);
+				if (subnetBroadcast != localIP)
+				{
+					_udpBroadcaster.ConnectToHost(subnetBroadcast, DefaultPort + 1);
+					result = _udpBroadcaster.PutPacket(packet);
+					_udpBroadcaster.Close();
+					
+					if (result == Error.Ok)
+					{
+						GD.Print($"Broadcasted server to {subnetBroadcast}: {_currentServerInfo.ServerName}");
+					}
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"Error broadcasting server: {e.Message}");
 		}
 	}
 
@@ -511,20 +548,28 @@ public partial class NetworkManager : Node
 
 	private string GetLocalIPAddress()
 	{
-		var interfaces = IP.GetLocalInterfaces();
-		foreach (var iface in interfaces)
+		var addresses = IP.GetLocalAddresses();
+		foreach (var address in addresses)
 		{
-			var addresses = IP.GetLocalAddresses();
-			foreach (var address in addresses)
+			// Return first non-loopback IPv4 address
+			if (address != "127.0.0.1" && address.Contains('.') && !address.Contains(':'))
 			{
-				// Return first non-loopback IPv4 address
-				if (address != "127.0.0.1" && address.Contains('.') && !address.Contains(':'))
-				{
-					return address;
-				}
+				return address;
 			}
 		}
 		return "127.0.0.1";
+	}
+	
+	private string GetSubnetBroadcast(string localIP)
+	{
+		// Simple subnet broadcast calculation for common /24 networks
+		// For a more robust solution, you'd want to check actual subnet mask
+		var parts = localIP.Split('.');
+		if (parts.Length == 4)
+		{
+			return $"{parts[0]}.{parts[1]}.{parts[2]}.255";
+		}
+		return localIP;
 	}
 
 	public override void _ExitTree()

@@ -479,6 +479,13 @@ public partial class MultiplayerUI : Control
 		var port = (int)_portSpinBox.Value;
 		var maxPlayers = (int)_maxPlayersSpinBox.Value;
 
+		if (string.IsNullOrEmpty(serverName))
+		{
+			serverName = "PolyGun Server";
+		}
+
+		GD.Print($"Creating server: {serverName} on port {port} with {maxPlayers} max players");
+		
 		NetworkManager.Instance.MaxPlayers = maxPlayers;
 		var result = NetworkManager.Instance?.CreateServer(serverName, password, port);
 		
@@ -489,6 +496,7 @@ public partial class MultiplayerUI : Control
 		else
 		{
 			GD.PrintErr($"Failed to create server: {result}");
+			_refreshStatus.Text = $"Failed to create server: {result}";
 		}
 	}
 
@@ -530,6 +538,7 @@ public partial class MultiplayerUI : Control
 		// Get servers from NetworkManager since we can't pass them via signal
 		var servers = NetworkManager.Instance?.DiscoveredServers ?? new List<ServerInfo>();
 		_currentServers = servers.ToList();
+		GD.Print($"Server list updated: {_currentServers.Count} servers found");
 		UpdateServerList();
 	}
 
@@ -565,7 +574,16 @@ public partial class MultiplayerUI : Control
 		_joinSelectedButton.Disabled = true;
 		_refreshStatus.Text = "Searching for servers...";
 		
+		GD.Print("Starting server discovery...");
 		NetworkManager.Instance?.StartServerDiscovery();
+		
+		// Auto-refresh after a few seconds if no servers found
+		GetTree().CreateTimer(5.0).Timeout += () => {
+			if (_currentServers.Count == 0)
+			{
+				_refreshStatus.Text = "No servers found. Click Refresh to try again.";
+			}
+		};
 	}
 
 	private void UpdateServerList()
