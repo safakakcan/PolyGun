@@ -50,11 +50,11 @@ Client                          Server
 ------                          ------
 Input Capture       ────────►   Command Validation
 Client Prediction              ┌─ Movement Simulation
-      │                        │  Combat Resolution
-      ▼                        │  Lag Compensation
+	  │                        │  Combat Resolution
+	  ▼                        │  Lag Compensation
 Local Simulation              └─ World Update
-      │                           │
-      ▼                           ▼
+	  │                           │
+	  ▼                           ▼
 Reconciliation      ◄────────   State Broadcast
 Interpolation                   (64Hz)
 ```
