@@ -30,7 +30,12 @@ public partial class GameManager : Node
 	// References
 	private PlayerController _player;
 	private UIManager _uiManager;
+	private NetworkManager _networkManager;
+	private LobbyUI _lobbyUI;
 	private List<PlayerController> _allPlayers = new List<PlayerController>();
+	
+	// Multiplayer State
+	private bool _isMultiplayerMode = false;
 	
 	// Singleton pattern
 	public static GameManager Instance { get; private set; }
@@ -61,7 +66,64 @@ public partial class GameManager : Node
 	
 	private void InitializeGame()
 	{
-		// Find and setup player
+		// Check if we're starting in multiplayer mode
+		CheckMultiplayerMode();
+		
+		if (_isMultiplayerMode)
+		{
+			SetupMultiplayer();
+		}
+		else
+		{
+			SetupSinglePlayer();
+		}
+		
+		LoadGameSettings();
+	}
+	
+	private void CheckMultiplayerMode()
+	{
+		// Check for multiplayer arguments or network manager presence
+		_networkManager = NetworkManager.Instance;
+		_isMultiplayerMode = _networkManager != null;
+		
+		// Also check command line arguments
+		var args = OS.GetCmdlineArgs();
+		foreach (string arg in args)
+		{
+			if (arg == "--multiplayer" || arg == "-mp")
+			{
+				_isMultiplayerMode = true;
+				break;
+			}
+		}
+	}
+	
+	private void SetupMultiplayer()
+	{
+		GD.Print("Starting in multiplayer mode");
+		
+		// Create lobby UI instead of starting game immediately
+		_lobbyUI = new LobbyUI();
+		GetTree().CurrentScene.AddChild(_lobbyUI);
+		_lobbyUI.GameStartRequested += OnMultiplayerGameStart;
+		
+		// Connect to network manager events
+		if (_networkManager != null)
+		{
+			_networkManager.ServerStarted += OnServerStarted;
+			_networkManager.ClientConnected += OnClientConnected;
+			_networkManager.ClientDisconnected += OnClientDisconnected;
+		}
+		
+		ChangeGameState(GameState.MainMenu); // Show lobby
+	}
+	
+	private void SetupSinglePlayer()
+	{
+		GD.Print("Starting in single-player mode");
+		
+		// Find and setup player (traditional single-player setup)
 		_player = GetTree().CurrentScene.GetNode<PlayerController>("Player");
 		if (_player != null)
 		{
@@ -77,7 +139,6 @@ public partial class GameManager : Node
 			_uiManager.GameResumed += OnGameResumed;
 		}
 		
-		LoadGameSettings();
 		ChangeGameState(GameState.Playing);
 	}
 	
@@ -325,8 +386,101 @@ public partial class GameManager : Node
 		ProjectSettings.SetSetting("game/total_playtime", total);
 	}
 	
+	private void OnMultiplayerGameStart()
+	{
+		// Hide lobby UI and start the actual game
+		if (_lobbyUI != null)
+		{
+			_lobbyUI.Visible = false;
+		}
+		
+		// Initialize multiplayer game
+		SetupMultiplayerGame();
+		ChangeGameState(GameState.Playing);
+	}
+	
+	private void SetupMultiplayerGame()
+	{
+		// Find UI Manager
+		_uiManager = GetTree().CurrentScene.GetNode<UIManager>("UIManager");
+		if (_uiManager != null)
+		{
+			_uiManager.GamePaused += OnGamePaused;
+			_uiManager.GameResumed += OnGameResumed;
+		}
+		
+		// Get all players from network manager
+		if (_networkManager != null)
+		{
+			_allPlayers = _networkManager.GetAllPlayers();
+			_player = _networkManager.GetLocalPlayer();
+			
+			// Connect to player events
+			foreach (var player in _allPlayers)
+			{
+				player.PlayerDied += OnPlayerDied;
+			}
+		}
+	}
+	
+	private void OnServerStarted()
+	{
+		GD.Print("Game: Server started successfully");
+	}
+	
+	private void OnClientConnected()
+	{
+		GD.Print("Game: Connected to server");
+	}
+	
+	private void OnClientDisconnected()
+	{
+		GD.Print("Game: Disconnected from server");
+		
+		// Return to lobby or main menu
+		if (_lobbyUI != null)
+		{
+			_lobbyUI.Visible = true;
+		}
+		
+		ChangeGameState(GameState.MainMenu);
+	}
+	
+	// Add kill tracking for multiplayer
+	public void AddKillForPlayer(int playerId, int victimId)
+	{
+		_kills++;
+		AddScore(100); // Award points for kills
+		
+		// Additional multiplayer-specific logic
+		if (_networkManager != null)
+		{
+			var killer = _networkManager.GetPlayer(playerId);
+			var victim = _networkManager.GetPlayer(victimId);
+			
+			if (killer != null && victim != null)
+			{
+				GD.Print($"{killer.PlayerName} killed {victim.PlayerName}!");
+			}
+		}
+	}
+	
+	// Network-aware save/load (only save for local/host player)
+	public void SaveGameSettingsNetwork()
+	{
+		if (_isMultiplayerMode && _networkManager?.IsClient == true && !_networkManager.IsServer)
+		{
+			return; // Don't save settings as client
+		}
+		
+		SaveGameSettings();
+	}
+
 	public override void _ExitTree()
 	{
+		// Disconnect from multiplayer if connected
+		_networkManager?.Disconnect();
+		
 		SaveGameSettings();
 		
 		if (Instance == this)

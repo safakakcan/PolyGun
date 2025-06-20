@@ -11,6 +11,7 @@ public partial class PlayerController : CharacterBody3D
 	// Network
 	[Export] public bool IsLocal = true;
 	[Export] public string PlayerName = "Player";
+	[Export] public int NetworkId = -1;
 	
 	// Health System
 	[Export] public int MaxHealth = 100;
@@ -42,6 +43,10 @@ public partial class PlayerController : CharacterBody3D
 	private Camera3D _camera;
 	private Node3D _gunPoint;
 	private WeaponSystem _weaponSystem;
+	
+	// Network Components
+	private ClientPrediction _clientPrediction;
+	private bool _isNetworkReady;
 
 	// Legacy support - will be removed once weapon system is fully integrated
 	[Export] public PackedScene BulletScene;
@@ -58,6 +63,7 @@ public partial class PlayerController : CharacterBody3D
 		InitializeComponents();
 		InitializeStats();
 		SetupUI();
+		SetupNetworking();
 	}
 
 	private void InitializeComponents()
@@ -72,6 +78,16 @@ public partial class PlayerController : CharacterBody3D
 			// Create weapon system if it doesn't exist
 			_weaponSystem = new WeaponSystem();
 			AddChild(_weaponSystem);
+		}
+		
+		// Determine if this is the local player
+		if (GetTree().GetMultiplayer().IsServer())
+		{
+			IsLocal = true; // Server controls all players authoritatively
+		}
+		else
+		{
+			IsLocal = GetMultiplayerAuthority() == GetTree().GetMultiplayer().GetUniqueId();
 		}
 		
 		if (IsLocal) 
@@ -175,7 +191,8 @@ public partial class PlayerController : CharacterBody3D
 		UpdateCooldowns(delta);
 		UpdateHealthRegeneration(delta);
 
-		if (IsLocal)
+		// Only handle input if this is the local player AND prediction is not handling it
+		if (IsLocal && (_clientPrediction == null || !_isNetworkReady))
 		{
 			HandleInput(delta);
 		}
@@ -405,6 +422,108 @@ public partial class PlayerController : CharacterBody3D
 		SetProcess(true);
 		
 		GD.Print($"{PlayerName} respawned!");
+	}
+
+	private void SetupNetworking()
+	{
+		// Auto-assign network ID if not set
+		if (NetworkId == -1)
+		{
+			NetworkId = GetMultiplayerAuthority();
+		}
+		
+		// Find or create client prediction for local players
+		if (IsLocal && !GetTree().GetMultiplayer().IsServer())
+		{
+			_clientPrediction = GetNode<ClientPrediction>("../ClientPrediction");
+			if (_clientPrediction != null)
+			{
+				_clientPrediction.Initialize(this);
+				_isNetworkReady = true;
+				GD.Print($"Network setup complete for local player {PlayerName} (ID: {NetworkId})");
+			}
+		}
+		
+		// Register with AuthoritativeServer if this is the server
+		if (GetTree().GetMultiplayer().IsServer())
+		{
+			var authServer = AuthoritativeServer.Instance;
+			if (authServer != null)
+			{
+				authServer.ConnectPlayer(NetworkId, PlayerName, this);
+			}
+		}
+	}
+	
+	// Network state synchronization for interpolation (remote players)
+	[Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable)]
+	public void UpdateNetworkState(Vector3 position, Vector3 velocity, Vector3 lookDirection, float health, int ammo, int weapon)
+	{
+		if (IsLocal) return; // Local player uses prediction, not interpolation
+		
+		// Apply server state to remote player
+		GlobalPosition = position;
+		Velocity = velocity;
+		
+		// Update look direction (simplified - would normally interpolate)
+		if (_camera != null)
+		{
+			// Apply look direction to camera rotation
+			// This is a simplified version - production would use proper interpolation
+		}
+		
+		// Update UI if this player's state changed significantly
+		if (Mathf.Abs(health - _currentHealth) > 0.1f)
+		{
+			_currentHealth = (int)health;
+			EmitSignal(SignalName.HealthChanged, _currentHealth);
+		}
+		
+		// Update weapon system state
+		if (_weaponSystem != null && _weaponSystem.CurrentWeapon != null && _weaponSystem.CurrentWeapon.CurrentAmmo != ammo)
+		{
+			// Sync ammo count
+			EmitSignal(SignalName.AmmoChanged, ammo, _weaponSystem.CurrentWeapon.MaxAmmo);
+		}
+	}
+	
+	// Server-authoritative damage application
+	[Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = true, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+	public void ApplyNetworkDamage(int damage, int shooterId)
+	{
+		TakeDamage(damage);
+		
+		// Additional effects for network damage (hit markers, etc.)
+		string shooterName = GetPlayerNameById(shooterId);
+		GD.Print($"{PlayerName} took {damage} damage from {shooterName}!");
+	}
+	
+	// Helper method to get player name by ID (would be implemented based on your player management)
+	private string GetPlayerNameById(int playerId)
+	{
+		// This would typically query the game manager or player registry
+		return $"Player{playerId}";
+	}
+	
+	// Enable/disable prediction for testing
+	public void SetPredictionEnabled(bool enabled)
+	{
+		_isNetworkReady = enabled && _clientPrediction != null;
+	}
+	
+	// Get network statistics for debugging
+	public void PrintNetworkStats()
+	{
+		GD.Print($"Player {PlayerName} Network Stats:");
+		GD.Print($"  Is Local: {IsLocal}");
+		GD.Print($"  Network ID: {NetworkId}");
+		GD.Print($"  Prediction Enabled: {_isNetworkReady}");
+		GD.Print($"  Multiplayer Authority: {GetMultiplayerAuthority()}");
+		
+		if (_clientPrediction != null)
+		{
+			_clientPrediction.PrintPredictionStats();
+		}
 	}
 
 	// Legacy method for backward compatibility
